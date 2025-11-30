@@ -1,0 +1,55 @@
+# COCOON Worker Configuration Template
+# Copy this file to worker-0.conf and worker-1.conf and fill in your values
+# This template uses the official root contract address from the COCOON distribution
+
+[node]
+# Required: Node type (always 'worker' for workers)
+type = worker
+
+# Required: Model to serve
+# Default model from COCOON distribution
+model = Qwen/Qwen3-8B@b968826d9c46dd6066d109eabc6255188de91218:7e9d33bebf5518e0dc666e5a04ffbab247ff5878f91a9a55a6e942fe245a8ee9
+
+# Required: Your TON wallet address (receives payments)
+# Replace with your actual TON wallet address
+# Format: UQ... or EQ...
+owner_address = YOUR_TON_WALLET_ADDRESS_HERE
+
+# Required: Your GPU PCI address (find with: lspci | grep -i nvidia)
+# Example: 0000:01:00.0 for first GPU, 0000:02:00.0 for second GPU
+gpu = 0000:01:00.0
+
+# Required: Static secret to generate the revenue wallet. Keep private!
+# Generate with: openssl rand -base64 32
+# IMPORTANT: Keep this secret and secure! Never commit to git!
+node_wallet_key = YOUR_NODE_WALLET_KEY_BASE64_HERE
+
+# Required: Hugging Face token (get from: https://huggingface.co/settings/tokens)
+# Create a token with 'read' permissions
+hf_token = YOUR_HUGGINGFACE_TOKEN_HERE
+
+# Required: Path to TON config with stable liteservers
+# Use the mainnet config from the distribution
+ton_config = spec/mainnet-base-ton-config.json
+
+# Required: COCOON root contract address on TON
+# Official address from COCOON distribution worker.conf.example
+# This is the address of the COCOON root smart contract on TON blockchain
+root_contract_address = EQCns7bYSp0igFvS1wpb5wsZjCKCV19MD5AVzI4EyxsnU73k
+
+# Optional: Instance number for running multiple workers (default: 0)
+# Each instance gets unique ports and CIDs
+# Worker 0: instance = 0 (port 12000, CID 6)
+# Worker 1: instance = 1 (port 12010, CID 16)
+# Worker 2: instance = 2 (port 12020, CID 26)
+instance = 0
+
+# Optional: Price coefficient, 1000 = 1.0x (default: 1000)
+# Higher values = higher prices for your compute
+# Example: 2000 = 2.0x the base price
+worker_coefficient = 1000
+
+# Optional: Persistent disk image path, 100GB (default: persistent-worker-{instance}.img)
+# Each worker instance uses a separate persistent storage
+persistent = persistent-worker-0.img
+

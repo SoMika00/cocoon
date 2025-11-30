@@ -1,0 +1,32 @@
+# Distribution COCOON (téléchargée)
+release-8728fe7/
+cocoon-worker-release-latest.tar.xz
+
+# Logs
+logs/
+*.log
+
+# Images persistantes
+persistent-worker-*.img
+
+# Fichiers temporaires
+/tmp/
+*.tmp
+*.swp
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Clés privées (ne JAMAIS commiter!)
+*.key
+*.pem
+*_key
+*_private
+
+# Fichiers de configuration avec secrets (NE JAMAIS COMMITER!)
+worker-0.conf
+worker-1.conf
+

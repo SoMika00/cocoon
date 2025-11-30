@@ -1,0 +1,50 @@
+# COCOON Worker Configuration
+# Copy this file to worker.conf and fill in your values
+
+[worker]
+# Node type (always 'worker' for workers)
+type = worker
+
+# AI model to serve (e.g., Qwen/Qwen3-0.6B)
+# You can override this with --model flag
+model = Qwen/Qwen3-0.6B
+
+# Your TON wallet address (receives payments)
+# IMPORTANT: Replace with your actual TON wallet address
+owner_address = YOUR_TON_WALLET_ADDRESS_HERE
+
+# GPU PCI address (find with: lspci | grep -i nvidia)
+# For instance 0, use first GPU: 0000:01:00.0
+# For instance 1, use second GPU: 0000:02:00.0
+gpu = 0000:01:00.0
+
+# Private key for revenue wallet (base64, keep private!)
+# Generate with: openssl rand -base64 32
+# IMPORTANT: Keep this secret and secure!
+node_wallet_key = YOUR_NODE_WALLET_KEY_BASE64_HERE
+
+# Hugging Face token (get from https://huggingface.co/settings/tokens)
+# IMPORTANT: Replace with your actual HF token
+hf_token = YOUR_HUGGINGFACE_TOKEN_HERE
+
+# Path to TON network config file
+# Use the included mainnet config or provide your own
+ton_config = mainnet-config.json
+
+# COCOON root contract address on TON
+# This is the address of the COCOON root smart contract
+# The correct address for current network should be in the distribution
+root_contract_address = YOUR_ROOT_CONTRACT_ADDRESS_HERE
+
+# Optional: Instance number for running multiple workers (default: 0)
+# Each instance gets unique ports and CIDs
+instance = 0
+
+# Optional: Price coefficient (1000 = 1.0x, default: 1000)
+# Higher values = higher prices for your compute
+worker_coefficient = 1000
+
+# Optional: Persistent disk image path
+# Default: persistent-worker-{instance}.img
+persistent = persistent-worker-0.img
+
