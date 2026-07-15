@@ -9,6 +9,108 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+FORCE=false
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --force)
+            FORCE=true
+            shift
+            ;;
+    esac
+done
+
+validate_prerequisites() {
+    local errors=0
+
+    echo "=== Prerequisite Validation ==="
+    echo ""
+
+    # 1. Check seal-server process
+    if ! pgrep -f "seal-server" > /dev/null; then
+        echo -e "${RED}✗${NC} seal-server is not running"
+        echo "  Next step: Start it with: ./bin/seal-server --enclave-path ./bin/enclave.signed.so"
+        ((errors++))
+    else
+        echo -e "${GREEN}✓${NC} seal-server is running"
+    fi
+
+    # 2. Check worker config files and required keys
+    for worker in 0 1; do
+        conf="worker-${worker}.conf"
+        if [ ! -f "$conf" ]; then
+            # Try parent dir
+            if [ -f "../$conf" ]; then
+                cp "../$conf" .
+                echo -e "${GREEN}✓${NC} Copied $conf from parent"
+            else
+                echo -e "${RED}✗${NC} $conf not found"
+                echo "  Next step: Run setup-h100.sh or create from worker.conf.template"
+                ((errors++))
+                continue
+            fi
+        fi
+
+        # Check for non-placeholder values
+        for key in owner_address node_wallet_key hf_token root_contract_address; do
+            val=$(grep "^${key}" "$conf" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -1)
+            if [ -z "$val" ] || [[ "$val" == YOUR_* ]] || [[ "$val" == "[PRIVATE]" ]]; then
+                echo -e "${RED}✗${NC} $conf: $key has placeholder or empty value"
+                echo "  Next step: Edit $conf and set a real value for $key"
+                ((errors++))
+            fi
+        done
+        if [ $errors -eq 0 ]; then
+            echo -e "${GREEN}✓${NC} $conf validated"
+        fi
+    done
+
+    # 3. Check both H100 GPUs via lspci
+    GPU_COUNT=$(lspci | grep -i "H100\|GH100" | wc -l)
+    if [ "$GPU_COUNT" -lt 2 ]; then
+        echo -e "${RED}✗${NC} Less than 2 H100 GPUs detected (found: $GPU_COUNT)"
+        echo "  Next step: Verify hardware / lspci | grep -i nvidia"
+        ((errors++))
+    else
+        echo -e "${GREEN}✓${NC} Both H100 GPUs detected"
+    fi
+
+    # 4. Verify binaries are executable
+    if [ -f "./scripts/cocoon-launch" ]; then
+        if [ ! -x "./scripts/cocoon-launch" ]; then
+            echo -e "${YELLOW}⚠${NC} cocoon-launch not executable (fixing...)"
+            chmod +x "./scripts/cocoon-launch"
+        fi
+        echo -e "${GREEN}✓${NC} cocoon-launch binary present and executable"
+    else
+        echo -e "${RED}✗${NC} cocoon-launch not found"
+        echo "  Next step: Ensure COCOON distribution is extracted in current dir"
+        ((errors++))
+    fi
+
+    if [ -f "./bin/seal-server" ]; then
+        if [ ! -x "./bin/seal-server" ]; then
+            echo -e "${YELLOW}⚠${NC} seal-server not executable (fixing...)"
+            chmod +x "./bin/seal-server"
+        fi
+        echo -e "${GREEN}✓${NC} seal-server binary present and executable"
+    else
+        echo -e "${RED}✗${NC} seal-server binary not found"
+        echo "  Next step: Download/extract COCOON distribution"
+        ((errors++))
+    fi
+
+    echo ""
+    if [ $errors -gt 0 ]; then
+        echo -e "${RED}Validation failed with $errors error(s).${NC}"
+        echo "Use --force to bypass (not recommended)."
+        return 1
+    fi
+    echo -e "${GREEN}All prerequisites validated successfully.${NC}"
+    return 0
+}
+
 echo "=== COCOON H100 Workers Launcher ==="
 echo ""
 
@@ -26,7 +128,16 @@ fi
 
 cd "$COCOON_DIR"
 
-# Check if seal-server is running
+# Run validation unless --force
+if [ "$FORCE" != true ]; then
+    if ! validate_prerequisites; then
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}--force specified: skipping prerequisite validation${NC}"
+fi
+
+# Check if seal-server is running (still warn even with force)
 if ! pgrep -f "seal-server" > /dev/null; then
     echo -e "${YELLOW}Warning: seal-server does not appear to be running${NC}"
     echo "seal-server is required for production mode."
@@ -152,4 +263,3 @@ echo "  kill $WORKER0_PID $WORKER1_PID"
 # Save PIDs to file
 echo "$WORKER0_PID" > logs/worker-0.pid
 echo "$WORKER1_PID" > logs/worker-1.pid
-
