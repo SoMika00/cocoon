@@ -10,6 +10,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 FORCE=false
+DRY_RUN=false
 
 # Parse arguments
 for arg in "$@"; do
@@ -17,6 +18,16 @@ for arg in "$@"; do
         --force)
             FORCE=true
             shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--force] [--dry-run]"
+            echo "  --force    Skip prerequisite validation (not recommended)"
+            echo "  --dry-run  Validate prerequisites, print planned commands and exit without starting workers"
+            exit 0
             ;;
     esac
 done
@@ -112,6 +123,7 @@ validate_prerequisites() {
 }
 
 echo "=== COCOON H100 Workers Launcher ==="
+
 echo ""
 
 # Check if we're in the right directory
@@ -135,6 +147,20 @@ if [ "$FORCE" != true ]; then
     fi
 else
     echo -e "${YELLOW}--force specified: skipping prerequisite validation${NC}"
+fi
+
+if [ "$DRY_RUN" = true ]; then
+    echo ""
+    echo "=== DRY RUN: Planned commands ==="
+    echo ""
+    echo "# Worker 0"
+    echo "./scripts/cocoon-launch $MODE_FLAGS --instance 0 --gpu $GPU1 worker-0.conf > logs/worker-0.log 2>&1 &"
+    echo ""
+    echo "# Worker 1"
+    echo "./scripts/cocoon-launch $MODE_FLAGS --instance 1 --gpu $GPU2 worker-1.conf > logs/worker-1.log 2>&1 &"
+    echo ""
+    echo -e "${GREEN}Dry-run completed successfully. No processes started, no logs/PID files written.${NC}"
+    exit 0
 fi
 
 # Check if seal-server is running (still warn even with force)
