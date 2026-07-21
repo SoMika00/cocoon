@@ -11,10 +11,12 @@ NC='\033[0m' # No Color
 
 FORCE=false
 DRY_RUN=false
+WAIT_READY=false
+TIMEOUT=120
 
 # Parse arguments
-for arg in "$@"; do
-    case $arg in
+while [[ $# -gt 0 ]]; do
+    case $1 in
         --force)
             FORCE=true
             shift
@@ -23,11 +25,25 @@ for arg in "$@"; do
             DRY_RUN=true
             shift
             ;;
+        --wait-ready)
+            WAIT_READY=true
+            shift
+            ;;
+        --timeout)
+            TIMEOUT="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "Usage: $0 [--force] [--dry-run]"
-            echo "  --force    Skip prerequisite validation (not recommended)"
-            echo "  --dry-run  Validate prerequisites, print planned commands and exit without starting workers"
+            echo "Usage: $0 [--force] [--dry-run] [--wait-ready] [--timeout N]"
+            echo "  --force       Skip prerequisite validation (not recommended)"
+            echo "  --dry-run     Validate prerequisites, print planned commands and exit without starting workers"
+            echo "  --wait-ready  Poll worker /stats endpoints until both respond with 200 (or timeout)"
+            echo "  --timeout N   Seconds to wait for ready (default: 120)"
             exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
             ;;
     esac
 done
@@ -206,41 +222,41 @@ GPU1=$(lspci | grep -i "H100\|GH100" | head -n1 | awk '{print "0000:" $1}')
 GPU2=$(lspci | grep -i "H100\|GH100" | tail -n1 | awk '{print "0000:" $1}')
 
 echo "GPU Configuration:"
-echo "  Worker 0: $GPU1"
-echo "  Worker 1: $GPU2"
-echo ""
+    echo "  Worker 0: $GPU1"
+    echo "  Worker 1: $GPU2"
+    echo ""
 
 # Ask for mode
 echo "Select launch mode:"
-echo "1) Production mode (requires seal-server)"
-echo "2) Test mode (with debug shell, real TON)"
-echo "3) Test mode (with debug shell, fake TON)"
-read -p "Choice [1-3]: " -n 1 -r
-echo ""
+    echo "1) Production mode (requires seal-server)"
+    echo "2) Test mode (with debug shell, real TON)"
+    echo "3) Test mode (with debug shell, fake TON)"
+    read -p "Choice [1-3]: " -n 1 -r
+    echo ""
 
 MODE_FLAGS=""
-case $REPLY in
-    1)
-        MODE_FLAGS=""
-        echo -e "${GREEN}Launching in PRODUCTION mode${NC}"
-        ;;
-    2)
-        MODE_FLAGS="--test"
-        echo -e "${YELLOW}Launching in TEST mode (real TON)${NC}"
-        ;;
-    3)
-        MODE_FLAGS="--test --fake-ton"
-        echo -e "${YELLOW}Launching in TEST mode (fake TON)${NC}"
-        ;;
-    *)
-        echo -e "${RED}Invalid choice${NC}"
-        exit 1
-        ;;
-esac
+    case $REPLY in
+        1)
+            MODE_FLAGS=""
+            echo -e "${GREEN}Launching in PRODUCTION mode${NC}"
+            ;;
+        2)
+            MODE_FLAGS="--test"
+            echo -e "${YELLOW}Launching in TEST mode (real TON)${NC}"
+            ;;
+        3)
+            MODE_FLAGS="--test --fake-ton"
+            echo -e "${YELLOW}Launching in TEST mode (fake TON)${NC}"
+            ;;
+        *)
+            echo -e "${RED}Invalid choice${NC}"
+            exit 1
+            ;;
+    esac
 
 echo ""
-echo "Starting workers..."
-echo ""
+    echo "Starting workers..."
+    echo ""
 
 # Create log directory
 mkdir -p logs
@@ -261,31 +277,53 @@ WORKER1_PID=$!
 echo "Worker 1 PID: $WORKER1_PID"
 
 echo ""
-echo -e "${GREEN}=== Workers Started ===${NC}"
-echo ""
-echo "Worker 0:"
-echo "  PID: $WORKER0_PID"
-echo "  GPU: $GPU1"
-echo "  Port: 12000"
-echo "  Log: logs/worker-0.log"
-echo ""
-echo "Worker 1:"
-echo "  PID: $WORKER1_PID"
-echo "  GPU: $GPU2"
-echo "  Port: 12010"
-echo "  Log: logs/worker-1.log"
-echo ""
-echo "Monitor workers:"
-echo "  tail -f logs/worker-0.log"
-echo "  tail -f logs/worker-1.log"
-echo ""
-echo "Check stats:"
-echo "  curl http://localhost:12000/stats  # Worker 0"
-echo "  curl http://localhost:12010/stats  # Worker 1"
-echo ""
-echo "Stop workers:"
-echo "  kill $WORKER0_PID $WORKER1_PID"
+    echo -e "${GREEN}=== Workers Started ===${NC}"
+    echo ""
+    echo "Worker 0:"
+    echo "  PID: $WORKER0_PID"
+    echo "  GPU: $GPU1"
+    echo "  Port: 12000"
+    echo "  Log: logs/worker-0.log"
+    echo ""
+    echo "Worker 1:"
+    echo "  PID: $WORKER1_PID"
+    echo "  GPU: $GPU2"
+    echo "  Port: 12010"
+    echo "  Log: logs/worker-1.log"
+    echo ""
+    echo "Monitor workers:"
+    echo "  tail -f logs/worker-0.log"
+    echo "  tail -f logs/worker-1.log"
+    echo ""
+    echo "Check stats:"
+    echo "  curl http://localhost:12000/stats  # Worker 0"
+    echo "  curl http://localhost:12010/stats  # Worker 1"
+    echo ""
+    echo "Stop workers:"
+    echo "  kill $WORKER0_PID $WORKER1_PID"
 
 # Save PIDs to file
 echo "$WORKER0_PID" > logs/worker-0.pid
 echo "$WORKER1_PID" > logs/worker-1.pid
+
+# Wait-ready polling (skipped in dry-run)
+if [ "$WAIT_READY" = true ]; then
+    echo ""
+    echo "Waiting for workers to become ready (timeout: ${TIMEOUT}s)..."
+    start_time=$(date +%s)
+    while true; do
+        code0=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://localhost:12000/stats || echo 000)
+        code1=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://localhost:12010/stats || echo 000)
+        if [ "$code0" = "200" ] && [ "$code1" = "200" ]; then
+            echo -e "${GREEN}Workers ready${NC}"
+            exit 0
+        fi
+        current_time=$(date +%s)
+        elapsed=$((current_time - start_time))
+        if [ $elapsed -ge $TIMEOUT ]; then
+            echo -e "${RED}Error: Timeout after ${TIMEOUT}s waiting for workers${NC}"
+            exit 1
+        fi
+        sleep 5
+    done
+fi
