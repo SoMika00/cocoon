@@ -311,6 +311,7 @@ if [ "$WAIT_READY" = true ]; then
     echo ""
     echo "Waiting for workers to become ready (timeout: ${TIMEOUT}s)..."
     start_time=$(date +%s)
+    delay=5
     while true; do
         code0=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://localhost:12000/stats || echo 000)
         code1=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" http://localhost:12010/stats || echo 000)
@@ -324,6 +325,11 @@ if [ "$WAIT_READY" = true ]; then
             echo -e "${RED}Error: Timeout after ${TIMEOUT}s waiting for workers${NC}"
             exit 1
         fi
-        sleep 5
+        echo "Retry attempt, waiting ${delay}s before next poll..."
+        sleep $delay
+        delay=$((delay * 2))
+        if [ $delay -gt 30 ]; then
+            delay=30
+        fi
     done
 fi
