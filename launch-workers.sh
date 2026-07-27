@@ -13,6 +13,7 @@ FORCE=false
 DRY_RUN=false
 WAIT_READY=false
 TIMEOUT=120
+MODE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -33,12 +34,17 @@ while [[ $# -gt 0 ]]; do
             TIMEOUT="$2"
             shift 2
             ;;
+        --mode)
+            MODE="$2"
+            shift 2
+            ;;
         --help|-h)
-            echo "Usage: $0 [--force] [--dry-run] [--wait-ready] [--timeout N]"
+            echo "Usage: $0 [--force] [--dry-run] [--wait-ready] [--timeout N] [--mode production|test|fake-ton]"
             echo "  --force       Skip prerequisite validation (not recommended)"
             echo "  --dry-run     Validate prerequisites, print planned commands and exit without starting workers"
             echo "  --wait-ready  Poll worker /stats endpoints until both respond with 200 (or timeout)"
             echo "  --timeout N   Seconds to wait for ready (default: 120)"
+            echo "  --mode MODE   Launch mode: production, test, or fake-ton (non-interactive)"
             exit 0
             ;;
         *)
@@ -226,15 +232,38 @@ echo "GPU Configuration:"
     echo "  Worker 1: $GPU2"
     echo ""
 
-# Ask for mode
-echo "Select launch mode:"
-    echo "1) Production mode (requires seal-server)"
-    echo "2) Test mode (with debug shell, real TON)"
-    echo "3) Test mode (with debug shell, fake TON)"
-    read -p "Choice [1-3]: " -n 1 -r
-    echo ""
-
+# Determine MODE_FLAGS
 MODE_FLAGS=""
+if [ -n "$MODE" ]; then
+    case "$MODE" in
+        production)
+            MODE_FLAGS=""
+            echo -e "${GREEN}Launching in PRODUCTION mode${NC}"
+            ;;
+        test)
+            MODE_FLAGS="--test"
+            echo -e "${YELLOW}Launching in TEST mode (real TON)${NC}"
+            ;;
+        fake-ton)
+            MODE_FLAGS="--test --fake-ton"
+            echo -e "${YELLOW}Launching in TEST mode (fake TON)${NC}"
+            ;;
+        *)
+            echo -e "${RED}Invalid --mode value: $MODE${NC}"
+            echo "Valid values: production, test, fake-ton"
+            echo "Usage: $0 [--mode production|test|fake-ton] ..."
+            exit 1
+            ;;
+    esac
+else
+    # Ask for mode (interactive)
+    echo "Select launch mode:"
+        echo "1) Production mode (requires seal-server)"
+        echo "2) Test mode (with debug shell, real TON)"
+        echo "3) Test mode (with debug shell, fake TON)"
+        read -p "Choice [1-3]: " -n 1 -r
+        echo ""
+
     case $REPLY in
         1)
             MODE_FLAGS=""
@@ -253,6 +282,7 @@ MODE_FLAGS=""
             exit 1
             ;;
     esac
+fi
 
 echo ""
     echo "Starting workers..."
