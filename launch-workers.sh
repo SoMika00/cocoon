@@ -99,6 +99,23 @@ validate_prerequisites() {
         fi
     done
 
+    # root_contract_address mismatch check against distribution example
+    if [ -f "worker.conf.example" ]; then
+        EXAMPLE_ROOT=$(grep "^root_contract_address" worker.conf.example 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -1)
+        if [ -n "$EXAMPLE_ROOT" ] && [[ "$EXAMPLE_ROOT" != YOUR_* ]]; then
+            for worker in 0 1; do
+                conf="worker-${worker}.conf"
+                if [ -f "$conf" ]; then
+                    ACTUAL_ROOT=$(grep "^root_contract_address" "$conf" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -1)
+                    if [ -n "$ACTUAL_ROOT" ] && [ "$ACTUAL_ROOT" != "$EXAMPLE_ROOT" ]; then
+                        echo -e "${YELLOW}⚠${NC} root_contract_address mismatch in $conf (expected: $EXAMPLE_ROOT)"
+                        echo "  Suggested fix: sed -i 's|root_contract_address = .*|root_contract_address = $EXAMPLE_ROOT|' worker-*.conf worker.conf.example"
+                    fi
+                fi
+            done
+        fi
+    fi
+
     # 3. Check both H100 GPUs via lspci
     GPU_COUNT=$(lspci | grep -i "H100\|GH100" | wc -l)
     if [ "$GPU_COUNT" -lt 2 ]; then
@@ -284,6 +301,7 @@ else
     esac
 fi
 
+
 echo ""
     echo "Starting workers..."
     echo ""
@@ -292,6 +310,7 @@ echo ""
 mkdir -p logs
 
 # Launch worker 0
+
 echo -e "${GREEN}Starting Worker 0 (GPU: $GPU1)...${NC}"
 nohup ./scripts/cocoon-launch $MODE_FLAGS --instance 0 --gpu $GPU1 worker-0.conf > logs/worker-0.log 2>&1 &
 WORKER0_PID=$!
@@ -305,6 +324,7 @@ echo -e "${GREEN}Starting Worker 1 (GPU: $GPU2)...${NC}"
 nohup ./scripts/cocoon-launch $MODE_FLAGS --instance 1 --gpu $GPU2 worker-1.conf > logs/worker-1.log 2>&1 &
 WORKER1_PID=$!
 echo "Worker 1 PID: $WORKER1_PID"
+
 
 echo ""
     echo -e "${GREEN}=== Workers Started ===${NC}"

@@ -10,6 +10,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${BLUE}=== Vérification de la Configuration COCOON ===${NC}"
+
 echo ""
 
 ERRORS=0
@@ -32,7 +33,7 @@ check_config_value() {
     local file=$1
     local key=$2
     local expected=$3
-    
+
     if [ -f "$file" ]; then
         value=$(grep "^${key}" "$file" | cut -d'=' -f2 | tr -d ' ' | head -1)
         if [ "$value" = "$expected" ] || [ -z "$expected" ]; then
@@ -106,7 +107,7 @@ if [ -f "release-8728fe7/worker-0.conf" ] && [ -f "release-8728fe7/worker-1.conf
         echo -e "${YELLOW}⚠${NC} owner_address différent entre les workers"
         ((WARNINGS++))
     fi
-    
+
     KEY0=$(grep "^node_wallet_key" release-8728fe7/worker-0.conf | cut -d'=' -f2 | tr -d ' ')
     KEY1=$(grep "^node_wallet_key" release-8728fe7/worker-1.conf | cut -d'=' -f2 | tr -d ' ')
     if [ "$KEY0" = "$KEY1" ]; then
@@ -115,7 +116,7 @@ if [ -f "release-8728fe7/worker-0.conf" ] && [ -f "release-8728fe7/worker-1.conf
         echo -e "${YELLOW}⚠${NC} node_wallet_key différent entre les workers"
         ((WARNINGS++))
     fi
-    
+
     ROOT0=$(grep "^root_contract_address" release-8728fe7/worker-0.conf | cut -d'=' -f2 | tr -d ' ')
     ROOT1=$(grep "^root_contract_address" release-8728fe7/worker-1.conf | cut -d'=' -f2 | tr -d ' ')
     if [ "$ROOT0" = "$ROOT1" ] && [ "$ROOT0" = "EQCns7bYSp0igFvS1wpb5wsZjCKCV19MD5AVzI4EyxsnU73k" ]; then
@@ -123,6 +124,24 @@ if [ -f "release-8728fe7/worker-0.conf" ] && [ -f "release-8728fe7/worker-1.conf
     else
         echo -e "${RED}✗${NC} root_contract_address incorrect ou différent"
         ((ERRORS++))
+    fi
+fi
+echo ""
+
+# Cross-check against worker.conf.example if present
+if [ -f "release-8728fe7/worker.conf.example" ]; then
+    EXAMPLE_ROOT=$(grep "^root_contract_address" release-8728fe7/worker.conf.example 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -1)
+    if [ -n "$EXAMPLE_ROOT" ] && [[ "$EXAMPLE_ROOT" != YOUR_* ]]; then
+        for conf in release-8728fe7/worker-0.conf release-8728fe7/worker-1.conf; do
+            if [ -f "$conf" ]; then
+                ACTUAL=$(grep "^root_contract_address" "$conf" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' | head -1)
+                if [ -n "$ACTUAL" ] && [ "$ACTUAL" != "$EXAMPLE_ROOT" ]; then
+                    echo -e "${YELLOW}⚠${NC} root_contract_address mismatch vs worker.conf.example in $conf"
+                    echo "  Suggested fix: sed -i 's|root_contract_address = .*|root_contract_address = $EXAMPLE_ROOT|' worker-*.conf worker.conf.example"
+                    ((WARNINGS++))
+                fi
+            fi
+        done
     fi
 fi
 echo ""
@@ -186,4 +205,3 @@ else
     echo -e "${RED}✗ Configuration avec $ERRORS erreur(s) et $WARNINGS avertissement(s)${NC}"
     exit 1
 fi
-
