@@ -1,11 +1,11 @@
 #!/bin/bash
 # Script pour vérifier le statut des workers COCOON
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+GREEN='[0;32m'
+YELLOW='[1;33m'
+RED='[0;31m'
+BLUE='[0;34m'
+NC='[0m'
 
 TIMEOUT=3
 
@@ -100,6 +100,32 @@ tail -3 logs/worker-0.log 2>/dev/null || echo "  (log non disponible)"
 echo ""
 echo -e "${YELLOW}Worker 1:${NC}"
 tail -3 logs/worker-1.log 2>/dev/null || echo "  (log non disponible)"
+echo ""
+
+# GPU utilization monitor (section 6)
+echo -e "${BLUE}6. GPU Utilization (NVIDIA H100):${NC}"
+if command -v nvidia-smi &> /dev/null; then
+    for pci in 0000:01:00.0 0000:02:00.0; do
+        gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits -i $pci 2>/dev/null || echo "N/A")
+        if [[ "$gpu_info" == "N/A" ]] || [[ -z "$gpu_info" ]]; then
+            echo -e "  ${YELLOW}⚠${NC} GPU $pci: nvidia-smi query failed"
+        else
+            util=$(echo "$gpu_info" | cut -d',' -f1 | tr -d ' ')
+            mem_used=$(echo "$gpu_info" | cut -d',' -f2 | tr -d ' ')
+            mem_total=$(echo "$gpu_info" | cut -d',' -f3 | tr -d ' ')
+            if [ "$util" -ge 80 ]; then
+                color=$RED
+            elif [ "$util" -ge 50 ]; then
+                color=$YELLOW
+            else
+                color=$GREEN
+            fi
+            echo -e "  GPU $pci: ${color}${util}% util${NC}, ${mem_used}/${mem_total} MiB mem"
+        fi
+    done
+else
+    echo -e "  ${YELLOW}⚠${NC} nvidia-smi not found (NVIDIA drivers may be absent)"
+fi
 echo ""
 
 # Commandes utiles
