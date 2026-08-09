@@ -9,7 +9,9 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+
 echo -e "${BLUE}=== Vérification de la Configuration COCOON ===${NC}"
+
 
 echo ""
 
@@ -38,7 +40,11 @@ check_config_value() {
         value=$(grep "^${key}" "$file" | cut -d'=' -f2 | tr -d ' ' | head -1)
         if [ "$value" = "$expected" ] || [ -z "$expected" ]; then
             if [ -n "$value" ] && [ "$value" != "YOUR_"* ] && [ "$value" != "[PRIVATE]" ]; then
-                echo -e "${GREEN}✓${NC} $key = $value"
+                if grep -q "^# AUTO-GENERATED" "$file"; then
+                    echo -e "${GREEN}✓${NC} $key = [AUTO-GENERATED secure key - secret hidden]"
+                else
+                    echo -e "${GREEN}✓${NC} $key = $value"
+                fi
                 return 0
             else
                 echo -e "${RED}✗${NC} $key n'est pas configuré correctement"
@@ -57,6 +63,7 @@ check_config_value() {
     fi
 }
 
+
 echo -e "${BLUE}1. Vérification des fichiers de la distribution...${NC}"
 check_file "release-8728fe7/bin/seal-server"
 check_file "release-8728fe7/bin/enclave.signed.so"
@@ -66,10 +73,12 @@ check_file "release-8728fe7/spec/mainnet-base-ton-config.json"
 check_file "release-8728fe7/worker.conf.example"
 echo ""
 
+
 echo -e "${BLUE}2. Vérification des fichiers de configuration...${NC}"
 check_file "release-8728fe7/worker-0.conf"
 check_file "release-8728fe7/worker-1.conf"
 echo ""
+
 
 echo -e "${BLUE}3. Vérification de la configuration Worker 0...${NC}"
 if [ -f "release-8728fe7/worker-0.conf" ]; then
@@ -84,6 +93,7 @@ if [ -f "release-8728fe7/worker-0.conf" ]; then
 fi
 echo ""
 
+
 echo -e "${BLUE}4. Vérification de la configuration Worker 1...${NC}"
 if [ -f "release-8728fe7/worker-1.conf" ]; then
     check_config_value "release-8728fe7/worker-1.conf" "type" "worker"
@@ -96,6 +106,7 @@ if [ -f "release-8728fe7/worker-1.conf" ]; then
     check_config_value "release-8728fe7/worker-1.conf" "ton_config" "spec/mainnet-base-ton-config.json"
 fi
 echo ""
+
 
 echo -e "${BLUE}5. Vérification de la cohérence des configurations...${NC}"
 if [ -f "release-8728fe7/worker-0.conf" ] && [ -f "release-8728fe7/worker-1.conf" ]; then
@@ -146,6 +157,7 @@ if [ -f "release-8728fe7/worker.conf.example" ]; then
 fi
 echo ""
 
+
 echo -e "${BLUE}6. Vérification des GPUs...${NC}"
 GPU_COUNT=$(lspci | grep -i "H100\|GH100" | wc -l)
 if [ "$GPU_COUNT" -ge 2 ]; then
@@ -156,6 +168,7 @@ else
     ((ERRORS++))
 fi
 echo ""
+
 
 echo -e "${BLUE}7. Vérification des permissions...${NC}"
 if [ -x "release-8728fe7/bin/seal-server" ]; then
@@ -172,6 +185,7 @@ else
     ((WARNINGS++))
 fi
 echo ""
+
 
 echo -e "${BLUE}8. Vérification du format des fichiers...${NC}"
 if grep -q "^\[node\]" release-8728fe7/worker-0.conf 2>/dev/null; then

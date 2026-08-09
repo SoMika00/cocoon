@@ -3,6 +3,33 @@
 
 set -e
 
+DRY_RUN=false
+INTERACTIVE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        --interactive)
+            INTERACTIVE=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--dry-run] [--interactive]"
+            echo "  --dry-run     Show what would be generated without modifying files"
+            echo "  --interactive Prompt before generating keys"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+
 echo "=== COCOON H100 Setup ==="
 echo ""
 
@@ -25,12 +52,17 @@ if [ ! -d "./cocoon-worker" ]; then
     echo "COCOON worker distribution not found."
     echo "Downloading from https://ci.cocoon.org/cocoon-worker-release-latest.tar.xz"
     echo ""
-    read -p "Download now? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        wget https://ci.cocoon.org/cocoon-worker-release-latest.tar.xz
-        tar xzf cocoon-worker-release-latest.tar.xz
-        cd cocoon-worker
+    if [ "$INTERACTIVE" = true ]; then
+        read -p "Download now? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            wget https://ci.cocoon.org/cocoon-worker-release-latest.tar.xz
+            tar xzf cocoon-worker-release-latest.tar.xz
+            cd cocoon-worker
+        else
+            echo "Please download and extract the COCOON distribution first."
+            exit 1
+        fi
     else
         echo "Please download and extract the COCOON distribution first."
         exit 1
@@ -38,6 +70,36 @@ if [ ! -d "./cocoon-worker" ]; then
 else
     cd cocoon-worker
 fi
+
+# Function to ensure secure node_wallet_key
+generate_wallet_key() {
+    local conf_file=$1
+    local key_line
+    key_line=$(grep "^node_wallet_key" "$conf_file" 2>/dev/null || true)
+    if [ -z "$key_line" ] || echo "$key_line" | grep -q "YOUR_\|YOUR_NODE\|placeholder\|^node_wallet_key = $"; then
+        local new_key
+        new_key=$(openssl rand -base64 32)
+        if [ "$DRY_RUN" = true ]; then
+            echo "  [DRY-RUN] Would generate unique key for $conf_file"
+            return 0
+        fi
+        if [ "$INTERACTIVE" = true ]; then
+            read -p "Generate secure node_wallet_key for $conf_file? (y/n) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "Skipping key generation for $conf_file"
+                return 0
+            fi
+        fi
+        # Replace or append with auto-generated marker
+        if grep -q "^node_wallet_key" "$conf_file"; then
+            sed -i "/^node_wallet_key/d" "$conf_file"
+        fi
+        echo "# AUTO-GENERATED - keep secret" >> "$conf_file"
+        echo "node_wallet_key = $new_key" >> "$conf_file"
+        echo "  Generated secure key for $conf_file (marked AUTO-GENERATED)"
+    fi
+}
 
 # Create configuration files
 echo "Creating configuration files..."
@@ -55,6 +117,8 @@ if [ ! -f "worker-0.conf" ]; then
     echo "  - instance: 0 (already set)"
 fi
 
+generate_wallet_key worker-0.conf
+
 # Worker 1 configuration
 if [ ! -f "worker-1.conf" ]; then
     cp worker.conf.example worker-1.conf
@@ -69,6 +133,14 @@ if [ ! -f "worker-1.conf" ]; then
     echo "  - instance: 1 (already set)"
 fi
 
+generate_wallet_key worker-1.conf
+
+if [ "$DRY_RUN" = true ]; then
+    echo ""
+    echo "[DRY-RUN] Completed - no files modified"
+    exit 0
+fi
+
 echo ""
 echo "=== Configuration Files Created ==="
 echo ""
@@ -76,4 +148,3 @@ echo "Next steps:"
 echo "1. Edit worker-0.conf and worker-1.conf with your credentials"
 echo "2. Start seal-server: ./bin/seal-server --enclave-path ./bin/enclave.signed.so"
 echo "3. Launch workers using: ./launch-workers.sh"
-
