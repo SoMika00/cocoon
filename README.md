@@ -101,6 +101,24 @@ Le script vous demandera le mode:
 
 ## 📊 Monitoring
 
+### Watchdog (auto-restart)
+
+`watchdog.sh` surveille les workers et redémarre automatiquement en cas d'échec.
+
+```bash
+chmod +x watchdog.sh
+./watchdog.sh --max-retries 5 --backoff 10
+```
+
+Lancer via launch-workers.sh:
+
+```bash
+../launch-workers.sh --watchdog
+```
+
+Logs des redémarrages: `logs/watchdog.log`
+Mode dry-run: `./watchdog.sh --dry-run`
+
 ### Statistiques HTTP
 
 ```bash
@@ -139,7 +157,7 @@ tail -f logs/worker-0.log
 tail -f logs/worker-1.log
 ```
 
-## 🛑 Arrêter les workers
+## 🚫 Arrêter les workers
 
 ```bash
 chmod +x ../stop-workers.sh
@@ -160,7 +178,7 @@ kill $(cat logs/worker-1.pid)
 
 Chaque worker peut être configuré avec:
 
-- `worker_coefficient` - Coefficient de prix (1000 = 1.0x, valeurs plus élevées = prix plus élevés)
+- `worker_coefficient` - Coefficient de prix (1000 = 1.0x, valeurs plus élevées = prix plus élevées)
 - `model` - Modèle AI à servir (par défaut: `Qwen/Qwen3-0.6B`)
 - `persistent` - Chemin de l'image disque persistante
 
@@ -199,7 +217,7 @@ Chaque instance obtient automatiquement:
 
 5. **Gardez vos clés privées secrètes** - `node_wallet_key` doit rester confidentiel.
 
-## 🆘 Dépannage
+## 💡 Dépannage
 
 ### Vérifier que seal-server tourne
 
@@ -229,4 +247,3 @@ Pour plus d'aide:
 - Documentation: https://cocoon.org/gpu-owners
 - GitHub: https://github.com/cocoon-org
 - Telegram: (voir site web)
-

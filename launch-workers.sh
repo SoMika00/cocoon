@@ -14,6 +14,7 @@ DRY_RUN=false
 WAIT_READY=false
 TIMEOUT=120
 MODE=""
+WATCHDOG=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -38,13 +39,18 @@ while [[ $# -gt 0 ]]; do
             MODE="$2"
             shift 2
             ;;
+        --watchdog)
+            WATCHDOG=true
+            shift
+            ;;
         --help|-h)
-            echo "Usage: $0 [--force] [--dry-run] [--wait-ready] [--timeout N] [--mode production|test|fake-ton]"
+            echo "Usage: $0 [--force] [--dry-run] [--wait-ready] [--timeout N] [--mode production|test|fake-ton] [--watchdog]"
             echo "  --force       Skip prerequisite validation (not recommended)"
             echo "  --dry-run     Validate prerequisites, print planned commands and exit without starting workers"
             echo "  --wait-ready  Poll worker /stats endpoints until both respond with 200 (or timeout)"
             echo "  --timeout N   Seconds to wait for ready (default: 120)"
             echo "  --mode MODE   Launch mode: production, test, or fake-ton (non-interactive)"
+            echo "  --watchdog    Start watchdog.sh in background after workers launch"
             exit 0
             ;;
         *)
@@ -356,6 +362,13 @@ echo ""
 echo "$WORKER0_PID" > logs/worker-0.pid
 echo "$WORKER1_PID" > logs/worker-1.pid
 
+if [ "$WATCHDOG" = true ]; then
+    echo ""
+    echo -e "${GREEN}Starting watchdog...${NC}"
+    nohup ./watchdog.sh > logs/watchdog.log 2>&1 &
+    echo "Watchdog PID: $!"
+fi
+
 # Wait-ready polling (skipped in dry-run)
 if [ "$WAIT_READY" = true ]; then
     echo ""
@@ -371,15 +384,4 @@ if [ "$WAIT_READY" = true ]; then
         fi
         current_time=$(date +%s)
         elapsed=$((current_time - start_time))
-        if [ $elapsed -ge $TIMEOUT ]; then
-            echo -e "${RED}Error: Timeout after ${TIMEOUT}s waiting for workers${NC}"
-            exit 1
-        fi
-        echo "Retry attempt, waiting ${delay}s before next poll..."
-        sleep $delay
-        delay=$((delay * 2))
-        if [ $delay -gt 30 ]; then
-            delay=30
-        fi
-    done
-fi
+        if [ $elapsed -ge $TIMEOUT
