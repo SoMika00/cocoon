@@ -47,28 +47,48 @@ echo "Found GPU 1: $GPU1"
 echo "Found GPU 2: $GPU2"
 echo ""
 
-# Check if COCOON distribution exists
-if [ ! -d "./cocoon-worker" ]; then
+# Check if COCOON distribution exists (cocoon-worker/ or release-*/)
+DIST_DIR=""
+if [ -d "./cocoon-worker" ]; then
+    DIST_DIR="cocoon-worker"
+elif ls -d release-* 2>/dev/null | head -n1 > /dev/null; then
+    DIST_DIR=$(ls -d release-* 2>/dev/null | head -n1)
+fi
+
+if [ -z "$DIST_DIR" ]; then
     echo "COCOON worker distribution not found."
-    echo "Downloading from https://ci.cocoon.org/cocoon-worker-release-latest.tar.xz"
-    echo ""
-    if [ "$INTERACTIVE" = true ]; then
-        read -p "Download now? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            wget https://ci.cocoon.org/cocoon-worker-release-latest.tar.xz
-            tar xzf cocoon-worker-release-latest.tar.xz
-            cd cocoon-worker
-        else
-            echo "Please download and extract the COCOON distribution first."
-            exit 1
-        fi
-    else
-        echo "Please download and extract the COCOON distribution first."
+    TAR="cocoon-worker-release-latest.tar.xz"
+    URL="https://ci.cocoon.org/$TAR"
+    echo "Downloading $TAR via wget..."
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] Would run: wget $URL"
+        echo "[DRY-RUN] Would run: tar -xJf $TAR"
+        echo "[DRY-RUN] Would cd into extracted directory"
+        echo "[DRY-RUN] Completed simulation - no network or file changes"
+        exit 0
+    fi
+    if ! wget "$URL"; then
+        echo "Error: Failed to download distribution from $URL"
         exit 1
     fi
+    if ! tar -xJf "$TAR"; then
+        echo "Error: Failed to extract $TAR"
+        exit 1
+    fi
+    # Determine extracted dir
+    if [ -d "./cocoon-worker" ]; then
+        DIST_DIR="cocoon-worker"
+    elif ls -d release-* 2>/dev/null | head -n1 > /dev/null; then
+        DIST_DIR=$(ls -d release-* 2>/dev/null | head -n1)
+    else
+        echo "Error: Could not find extracted cocoon-worker or release-* directory"
+        exit 1
+    fi
+    cd "$DIST_DIR"
+    echo "Extracted and changed into $DIST_DIR"
 else
-    cd cocoon-worker
+    cd "$DIST_DIR"
+    echo "Using existing distribution in $DIST_DIR"
 fi
 
 # Function to ensure secure node_wallet_key
@@ -76,7 +96,7 @@ generate_wallet_key() {
     local conf_file=$1
     local key_line
     key_line=$(grep "^node_wallet_key" "$conf_file" 2>/dev/null || true)
-    if [ -z "$key_line" ] || echo "$key_line" | grep -q "YOUR_\|YOUR_NODE\|placeholder\|^node_wallet_key = $"; then
+    if [ -z "$key_line" ] || echo "$key_line" | grep -q "YOUR_\|YOUR_NODE\|placeholder|^node_wallet_key = $"; then
         local new_key
         new_key=$(openssl rand -base64 32)
         if [ "$DRY_RUN" = true ]; then
@@ -140,6 +160,7 @@ if [ "$DRY_RUN" = true ]; then
     echo "[DRY-RUN] Completed - no files modified"
     exit 0
 fi
+
 
 echo ""
 echo "=== Configuration Files Created ==="

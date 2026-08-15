@@ -24,13 +24,14 @@ chmod +x check-prerequisites.sh
 ./check-prerequisites.sh
 ```
 
-### 2. Télécharger la distribution COCOON
+### 2. Configuration automatique (télécharge la distribution si manquante)
 
 ```bash
-wget https://ci.cocoon.org/cocoon-worker-release-latest.tar.xz
-tar xzf cocoon-worker-release-latest.tar.xz
-cd cocoon-worker
+chmod +x setup-h100.sh
+./setup-h100.sh
 ```
+
+Le script télécharge automatiquement `cocoon-worker-release-latest.tar.xz` via wget si `cocoon-worker/` ou `release-*/` est absent, l'extrait et change de répertoire. Utilisez `--dry-run` pour simuler.
 
 ### 3. Préparer le matériel
 
@@ -40,19 +41,7 @@ Avant de commencer, vous devez:
 2. **Activer CC sur GPU NVIDIA** - Vous devrez peut-être mettre à jour le VBIOS pour que l'attestation GPU fonctionne complètement
 3. **Préparer le GPU pour VFIO** - Utilisez le script `./scripts/setup-gpu-vfio` si disponible
 
-### 4. Configuration automatique
-
-```bash
-# Depuis le répertoire cocoon-worker
-chmod +x ../setup-h100.sh
-../setup-h100.sh
-```
-
-Cela créera:
-- `worker-0.conf` - Configuration pour le premier H100
-- `worker-1.conf` - Configuration pour le deuxième H100
-
-### 5. Éditer les fichiers de configuration
+### 4. Éditer les fichiers de configuration
 
 Éditez `worker-0.conf` et `worker-1.conf` avec vos informations:
 
@@ -76,7 +65,7 @@ root_contract_address = EQD...adresse_du_contrat...
 - Worker 0: `0000:01:00.0`
 - Worker 1: `0000:02:00.0`
 
-### 6. Démarrer seal-server
+### 5. Démarrer seal-server
 
 **IMPORTANT:** `seal-server` doit être lancé avant les workers. Il fournit la dérivation sécurisée des clés pour l'environnement TDX.
 
@@ -87,11 +76,11 @@ root_contract_address = EQD...adresse_du_contrat...
 
 > **Note:** Vous devez utiliser le fichier `enclave.signed.so` inclus dans la distribution. Un seul `seal-server` peut servir plusieurs workers.
 
-### 7. Lancer les workers
+### 6. Lancer les workers
 
 ```bash
-chmod +x ../launch-workers.sh
-../launch-workers.sh
+chmod +x launch-workers.sh
+./launch-workers.sh
 ```
 
 Le script vous demandera le mode:
@@ -113,7 +102,7 @@ chmod +x watchdog.sh
 Lancer via launch-workers.sh:
 
 ```bash
-../launch-workers.sh --watchdog
+./launch-workers.sh --watchdog
 ```
 
 Logs des redémarrages: `logs/watchdog.log`
@@ -132,7 +121,6 @@ curl http://localhost:12010/jsonstats
 ```
 
 ### Health Client
-
 Si disponible dans la distribution:
 
 ```bash
@@ -160,8 +148,8 @@ tail -f logs/worker-1.log
 ## 🚫 Arrêter les workers
 
 ```bash
-chmod +x ../stop-workers.sh
-../stop-workers.sh
+chmod +x stop-workers.sh
+./stop-workers.sh
 ```
 
 Ou manuellement:
