@@ -121,7 +121,6 @@ curl http://localhost:12010/jsonstats
 ```
 
 ### Health Client
-Si disponible dans la distribution:
 
 ```bash
 # Statut des workers
@@ -180,15 +179,26 @@ Chaque worker peut être configuré avec:
 ### Ports et CIDs
 
 Chaque instance obtient automatiquement:
-- **Ports uniques:** 12000, 12010, 12020, ...
-- **CIDs uniques:** 6, 16, 26, ...
-- **Stockage persistant séparé**
+- **Po
+
+## 🛠️ Configuration Validation
+
+Avant de lancer les workers, il est recommandé de valider les fichiers de configuration.
+
+```bash
+chmod +x validate-config.sh
+./validate-config.sh            # Valide tous les fichiers worker-*.conf
+./validate-config.sh worker-0.conf  # Valide un fichier spécifique
+./validate-config.sh --dry-run # Signale les problèmes sans interrompre le processus (code de sortie 0)
+```
+
+Le script vérifie la présence et le format des clés requises (`owner_address`, `node_wallet_key`, `hf_token`, `root_contract_address`). En cas d'erreur, il affiche des messages descriptifs et retourne un code de sortie non‑zéro (sauf en mode `--dry‑run`).
 
 ## 📚 Documentation
 
 - [Architecture COCOON](https://cocoon.org/architecture)
 - [TDX et Images](https://cocoon.org/tdx-and-images)
-- [RA-TLS](https://cocoon.org/ra-tls)
+- [RA‑TLS](https://cocoon.org/ra-tls)
 - [Smart Contracts](https://cocoon.org/smart-contracts)
 - [Seal Keys](https://cocoon.org/seal-keys)
 - [Deployment](https://cocoon.org/deployment)
