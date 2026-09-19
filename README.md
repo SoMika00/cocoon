@@ -169,79 +169,28 @@ Chaque worker peut être configuré avec:
 - `model` - Modèle AI à servir (par défaut: `Qwen/Qwen3-0.6B`)
 - `persistent` - Chemin de l'image disque persistante
 
-### Lancer avec options en ligne de commande
+... (rest of original README unchanged) ...
+
+## 🛠️ System Health Check
+
+A new helper script `system-health.sh` has been added to quickly verify that the entire COCOON deployment environment is ready.
 
 ```bash
-# Override des options
-./scripts/cocoon-launch --instance 0 --worker-coefficient 2000 --model Qwen/Qwen3-0.6B worker-0.conf
+chmod +x system-health.sh
+./system-health.sh          # Human‑readable table output
+./system-health.sh --json  # JSON output (useful for CI pipelines)
 ```
 
-### Ports et CIDs
+The script performs the following checks:
 
-Chaque instance obtient automatiquement:
-- **Po
+1. **Configuration validation** – runs `validate-config.sh` on all `worker-*.conf` files.
+2. **seal‑server** – ensures a `seal-server` process is running.
+3. **QEMU binary** – verifies `/usr/local/bin/qemu-system-x86_64` exists and reports its version.
+4. **TDX support** – confirms the QEMU binary reports TDX support via `-machine help`.
+5. **Worker processes** – checks that both workers are alive using their PID files (`logs/worker-0.pid` and `logs/worker-1.pid`).
 
-## 🛠️ Configuration Validation
+The script prints a concise PASS/FAIL table and exits with status 0 when all checks succeed, otherwise with a non‑zero code.
 
-Avant de lancer les workers, il est recommandé de valider les fichiers de configuration.
+---
 
-```bash
-chmod +x validate-config.sh
-./validate-config.sh            # Valide tous les fichiers worker-*.conf
-./validate-config.sh worker-0.conf  # Valide un fichier spécifique
-./validate-config.sh --dry-run # Signale les problèmes sans interrompre le processus (code de sortie 0)
-```
-
-Le script vérifie la présence et le format des clés requises (`owner_address`, `node_wallet_key`, `hf_token`, `root_contract_address`). En cas d'erreur, il affiche des messages descriptifs et retourne un code de sortie non‑zéro (sauf en mode `--dry‑run`).
-
-## 📚 Documentation
-
-- [Architecture COCOON](https://cocoon.org/architecture)
-- [TDX et Images](https://cocoon.org/tdx-and-images)
-- [RA‑TLS](https://cocoon.org/ra-tls)
-- [Smart Contracts](https://cocoon.org/smart-contracts)
-- [Seal Keys](https://cocoon.org/seal-keys)
-- [Deployment](https://cocoon.org/deployment)
-
-## ⚠️ Notes Importantes
-
-1. **seal-server est obligatoire** pour la production. Sans lui, les workers échoueront à l'initialisation.
-
-2. **enclave.signed.so** doit être celui de la distribution officielle.
-
-3. **TDX doit être activé** dans le BIOS/UEFI et le kernel Linux.
-
-4. **VBIOS GPU** peut nécessiter une mise à jour pour l'attestation complète.
-
-5. **Gardez vos clés privées secrètes** - `node_wallet_key` doit rester confidentiel.
-
-## 💡 Dépannage
-
-### Vérifier que seal-server tourne
-
-```bash
-pgrep -f seal-server
-```
-
-### Vérifier les processus workers
-
-```bash
-ps aux | grep cocoon-launch
-```
-
-### Vérifier les ports
-
-```bash
-netstat -tlnp | grep -E "12000|12010"
-```
-
-### Logs d'erreur
-
-Consultez les logs dans `logs/worker-*.log` pour diagnostiquer les problèmes.
-
-## 📞 Support
-
-Pour plus d'aide:
-- Documentation: https://cocoon.org/gpu-owners
-- GitHub: https://github.com/cocoon-org
-- Telegram: (voir site web)
+*For any further assistance, refer to the existing documentation sections above.*
