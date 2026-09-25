@@ -1,128 +1,140 @@
 #!/usr/bin/env bash
 
-# validate-config.sh - Validate worker configuration files
-#
-# Checks for required keys and basic format validation.
-# Supports optional file list, --dry-run, and --help.
+# validate-config.sh
+# Validates all worker-*.conf files in the current directory.
+# Checks for required keys and validates their formats.
+# Exits with status 0 if all configs are valid, otherwise non-zero.
+# Usage: ./validate-config.sh [--help]
 
 set -euo pipefail
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-usage() {
-  cat <<EOF
-Usage: ${0##*/} [options] [files...]
+print_help() {
+    cat <<EOF
+Usage: $0 [options]
 
 Options:
   --help        Show this help message and exit
-  --dry-run     Report issues but always exit with status 0
 
-If no files are specified, all files matching 'worker-*.conf' in the current directory are validated.
+The script scans all files matching 'worker-*.conf' in the current directory and validates:
+  - owner_address: must start with 'EQ' and be at least 10 characters long
+  - node_wallet_key: must be valid base64
+  - hf_token: must start with 'hf_'
+  - root_contract_address: must start with 'EQ' and be at least 10 characters long
+
+If any validation fails, a summary table is printed and the script exits with status 1.
 EOF
 }
 
-# Parse options
-DRY_RUN=false
-FILES=()
-while (( "$#" )); do
-  case "$1" in
-    --help)
-      usage
-      exit 0
-      ;;
-    --dry-run)
-      DRY_RUN=true
-      shift
-      ;;
-    --*)
-      echo -e "${RED}Error:${NC} Unknown option: $1" >&2
-      usage
-      exit 1
-      ;;
-    *)
-      FILES+=("$1")
-      shift
-      ;;
-  esac
-done
-
-# If no files provided, find default worker config files
-if [ ${#FILES[@]} -eq 0 ]; then
-  mapfile -t FILES < <(printf "%s\n" worker-*.conf 2>/dev/null | grep -v "*\.conf")
-fi
-
-if [ ${#FILES[@]} -eq 0 ]; then
-  echo -e "${YELLOW}Warning:${NC} No configuration files found to validate."
-  exit 0
-fi
-
-# Validation helpers
-required_keys=(owner_address node_wallet_key hf_token root_contract_address)
-
-has_error=false
-
-for cfg in "${FILES[@]}"; do
-  if [ ! -f "$cfg" ]; then
-    echo -e "${RED}Error:${NC} File not found: $cfg"
-    has_error=true
-    continue
-  fi
-  # Read key values (strip spaces, ignore comments)
-  declare -A values
-  while IFS='=' read -r key val; do
-    # Remove leading/trailing whitespace
-    key=$(echo "$key" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-    val=$(echo "$val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-    # Skip empty lines or comments
-    [[ -z "$key" ]] && continue
-    [[ "$key" =~ ^# ]] && continue
-    values["$key"]="$val"
-  done < <(grep -E "^[[:space:]]*[^#]" "$cfg" || true)
-
-  for k in "${required_keys[@]}"; do
-    if [[ -z "${values[$k]:-}" ]]; then
-      echo -e "${RED}Error:${NC} $cfg: Missing required key '$k'"
-      has_error=true
-    fi
-  done
-
-  # Specific format checks only if present
-  if [[ -n "${values[owner_address]:-}" ]]; then
-    if [[ "${values[owner_address]}" != EQD* ]]; then
-      echo -e "${RED}Error:${NC} $cfg: 'owner_address' must start with 'EQD'"
-      has_error=true
-    fi
-  fi
-
-  if [[ -n "${values[root_contract_address]:-}" ]]; then
-    if [[ "${values[root_contract_address]}" != EQD* ]]; then
-      echo -e "${RED}Error:${NC} $cfg: 'root_contract_address' must start with 'EQD'"
-      has_error=true
-    fi
-  fi
-
-  if [[ -n "${values[node_wallet_key]:-}" ]]; then
-    if [[ ! "${values[node_wallet_key]}" =~ ^[A-Za-z0-9+/=]+$ ]]; then
-      echo -e "${RED}Error:${NC} $cfg: 'node_wallet_key' is not a valid base64 string"
-      has_error=true
-    fi
-  fi
-
-done
-
-if $has_error; then
-  if $DRY_RUN; then
-    echo -e "${YELLOW}Dry-run mode:${NC} validation issues reported above."
+# Parse arguments
+if [[ "${1-}" == "--help" ]]; then
+    print_help
     exit 0
-  else
-    echo -e "${RED}Validation failed.${NC}"
-    exit 1
-  fi
+fi
+
+# Helper functions
+is_base64() {
+    # Returns 0 if input is valid base64, 1 otherwise
+    # Use openssl to attempt decode; suppress output
+    if command -v openssl >/dev/null 2>&1; then
+        echo "$1" | openssl base64 -d -A >/dev/null 2>&1
+    else
+        # Fallback: use base64 command if openssl not available
+        echo "$1" | base64 -d >/dev/null 2>&1
+    fi
+}
+
+# Collect results
+declare -a errors
+
+shopt -s nullglob
+conf_files=(worker-*.conf)
+shopt -u nullglob
+
+if [[ ${#conf_files[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}⚠ No worker-*.conf files found in the current directory.${NC}"
+    exit 0
+fi
+
+for cfg in "${conf_files[@]}"; do
+    # Read key=value pairs, ignoring comments and empty lines
+    while IFS='=' read -r key value; do
+        # Trim whitespace
+        key=$(echo "$key" | tr -d ' \t')
+        value=$(echo "$value" | sed -e 's/^ *//' -e 's/ *$//')
+        # Skip empty lines or comments
+        [[ -z "$key" ]] && continue
+        [[ "$key" == \#* ]] && continue
+        case "$key" in
+            owner_address)
+                OWNER_ADDRESS="$value"
+                ;;
+            node_wallet_key)
+                NODE_WALLET_KEY="$value"
+                ;;
+            hf_token)
+                HF_TOKEN="$value"
+                ;;
+            root_contract_address)
+                ROOT_CONTRACT_ADDRESS="$value"
+                ;;
+        esac
+    done < "$cfg"
+
+    # Validate presence
+    [[ -z "${OWNER_ADDRESS-}" ]] && errors+=("$cfg: missing owner_address")
+    [[ -z "${NODE_WALLET_KEY-}" ]] && errors+=("$cfg: missing node_wallet_key")
+    [[ -z "${HF_TOKEN-}" ]] && errors+=("$cfg: missing hf_token")
+    [[ -z "${ROOT_CONTRACT_ADDRESS-}" ]] && errors+=("$cfg: missing root_contract_address")
+
+    # Validate formats only if present
+    if [[ -n "${OWNER_ADDRESS-}" ]]; then
+        if [[ "$OWNER_ADDRESS" != EQ* ]] || (( ${#OWNER_ADDRESS} < 10 )); then
+            errors+=("$cfg: invalid owner_address (must start with 'EQ' and be >=10 chars)")
+        fi
+    fi
+    if [[ -n "${ROOT_CONTRACT_ADDRESS-}" ]]; then
+        if [[ "$ROOT_CONTRACT_ADDRESS" != EQ* ]] || (( ${#ROOT_CONTRACT_ADDRESS} < 10 )); then
+            errors+=("$cfg: invalid root_contract_address (must start with 'EQ' and be >=10 chars)")
+        fi
+    fi
+    if [[ -n "${NODE_WALLET_KEY-}" ]]; then
+        if ! is_base64 "$NODE_WALLET_KEY"; then
+            errors+=("$cfg: invalid node_wallet_key (not valid base64)")
+        fi
+    fi
+    if [[ -n "${HF_TOKEN-}" ]]; then
+        if [[ "$HF_TOKEN" != hf_* ]]; then
+            errors+=("$cfg: invalid hf_token (must start with 'hf_')")
+        fi
+    fi
+
+    # Unset variables for next file
+    unset OWNER_ADDRESS NODE_WALLET_KEY HF_TOKEN ROOT_CONTRACT_ADDRESS
+done
+
+if [[ ${#errors[@]} -eq 0 ]]; then
+    echo -e "${GREEN}All configuration files are valid.${NC}"
+    # Print a simple PASS table
+    printf "\n${BLUE}%-30s %s${NC}\n" "File" "Status"
+    for cfg in "${conf_files[@]}"; do
+        printf "${GREEN}%-30s %s${NC}\n" "$cfg" "PASS"
+    done
+    exit 0
 else
-  echo -e "${GREEN}All configuration files are valid.${NC}"
-  exit 0
+    echo -e "${RED}Configuration validation failed with ${#errors[@]} issue(s):${NC}"
+    printf "\n${BLUE}%-30s %s${NC}\n" "File" "Error"
+    for err in "${errors[@]}"; do
+        # Split at first colon to separate file and message
+        file=$(echo "$err" | cut -d':' -f1)
+        message=$(echo "$err" | cut -d':' -f2-)
+        printf "${RED}%-30s %s${NC}\n" "$file" "$message"
+    done
+    exit 1
 fi
