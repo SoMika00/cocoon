@@ -144,6 +144,26 @@ tail -f logs/worker-0.log
 tail -f logs/worker-1.log
 ```
 
+### GPU Utilization
+
+`gpu-utilization.sh` provides a quick overview of each H100 GPU's load and health.
+
+```bash
+chmod +x gpu-utilization.sh
+./gpu-utilization.sh            # Human‑readable table
+./gpu-utilization.sh --json     # JSON output for scripts/CI
+```
+
+The script displays:
+- GPU index
+- GPU name
+- Utilization (%)
+- Memory total (MiB)
+- Memory used (MiB)
+- Temperature (°C)
+
+It exits with status **1** if any GPU temperature exceeds **85°C**, otherwise **0**.
+
 ## 🚫 Arrêter les workers
 
 ```bash
