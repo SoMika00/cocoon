@@ -1,13 +1,47 @@
 #!/bin/bash
 # Script pour vérifier le statut des workers COCOON
 
-GREEN='[0;32m'
-YELLOW='[1;33m'
-RED='[0;31m'
-BLUE='[0;34m'
-NC='[0m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
 TIMEOUT=3
+
+print_help() {
+    cat <<'EOF'
+Usage: status-workers.sh [OPTIONS]
+
+Options:
+  -h, --help       Show this help message and exit
+  --json           Output a single machine-readable JSON object describing
+                   seal-server, both workers, HTTP stats, and GPU utilization.
+                   Exits 0 when overall_status is "ok", non-zero otherwise.
+
+Without --json, prints a human-readable colored status report.
+EOF
+}
+
+# Parse arguments
+OUTPUT_JSON=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            print_help
+            exit 0
+            ;;
+        --json)
+            OUTPUT_JSON=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            print_help
+            exit 2
+            ;;
+    esac
+done
 
 fetch_stats() {
     local port=$1
@@ -39,6 +73,93 @@ fetch_stats() {
     echo "$stats" | head -5 | sed 's/^/  /'
 }
 
+# ---------------------------------------------------------------------------
+# JSON mode
+# ---------------------------------------------------------------------------
+if $OUTPUT_JSON; then
+    # seal-server
+    if pgrep -f "seal-server" > /dev/null; then
+        SEAL_PID=$(pgrep -f "seal-server" | head -1)
+        SEAL_RUNNING=true
+    else
+        SEAL_PID=null
+        SEAL_RUNNING=false
+    fi
+
+    # Workers
+    WORKER0_PID=$(pgrep -f "cocoon-launch.*instance.*0" | head -1)
+    WORKER1_PID=$(pgrep -f "cocoon-launch.*instance.*1" | head -1)
+
+    build_worker_json() {
+        local instance=$1
+        local pid=$2
+        local port=$3
+        local running
+        local http_code=0
+        local reachable=false
+
+        if [[ -n "$pid" ]]; then
+            running=true
+        else
+            running=false
+            pid=null
+        fi
+
+        if [[ -n "$pid" ]] && [[ "$pid" != "null" ]]; then
+            http_code=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "http://localhost:${port}/stats" 2>/dev/null || echo 0)
+            if [[ "$http_code" == "200" ]]; then
+                reachable=true
+            fi
+        fi
+
+        echo "{\"instance\":$instance,\"running\":$running,\"pid\":$pid,\"port\":$port,\"stats_http_code\":$http_code,\"stats_reachable\":$reachable}"
+    }
+
+    WORKER0_JSON=$(build_worker_json 0 "$WORKER0_PID" 12000)
+    WORKER1_JSON=$(build_worker_json 1 "$WORKER1_PID" 12010)
+
+    # GPUs
+    GPUS_JSON="[]"
+    if command -v nvidia-smi &> /dev/null; then
+        gpus='['
+        first=true
+        for pci in 0000:01:00.0 0000:02:00.0; do
+            gpu_info=$(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits -i "$pci" 2>/dev/null || true)
+            if [[ -n "$gpu_info" ]]; then
+                util=$(echo "$gpu_info" | cut -d',' -f1 | tr -d ' ')
+                mem_used=$(echo "$gpu_info" | cut -d',' -f2 | tr -d ' ')
+                mem_total=$(echo "$gpu_info" | cut -d',' -f3 | tr -d ' ')
+                temp=$(echo "$gpu_info" | cut -d',' -f4 | tr -d ' ')
+                if $first; then
+                    first=false
+                else
+                    gpus+=','
+                fi
+                gpus+="{\"pci\":\"$pci\",\"utilization\":$util,\"memory_used\":$mem_used,\"memory_total\":$mem_total,\"temperature\":$temp}"
+            fi
+        done
+        gpus+=']'
+        GPUS_JSON="$gpus"
+    fi
+
+    # overall_status
+    if [[ "$SEAL_RUNNING" == "true" ]] && ([[ -n "$WORKER0_PID" ]] || [[ -n "$WORKER1_PID" ]]); then
+        OVERALL="ok"
+        EXIT_CODE=0
+    else
+        OVERALL="degraded"
+        EXIT_CODE=1
+    fi
+
+    printf '{"seal_server":{"running":%s,"pid":%s},"workers":[%s,%s],"gpus":%s,"overall_status":"%s"}\n' \
+        "$SEAL_RUNNING" "$SEAL_PID" "$WORKER0_JSON" "$WORKER1_JSON" "$GPUS_JSON" "$OVERALL"
+
+    exit $EXIT_CODE
+fi
+
+# ---------------------------------------------------------------------------
+# Human-readable mode (unchanged)
+# ---------------------------------------------------------------------------
 echo -e "${BLUE}=== Statut des Workers COCOON ===${NC}"
 
 echo ""
