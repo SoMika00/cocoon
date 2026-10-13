@@ -189,6 +189,33 @@ Chaque worker peut être configuré avec:
 - `model` - Modèle AI à servir (par défaut: `Qwen/Qwen3-0.6B`)
 - `persistent` - Chemin de l'image disque persistante
 
+### Validation de la configuration
+
+`validate-config.sh` vérifie tous les fichiers `worker-*.conf` du répertoire courant et valide les clés requises (`owner_address`, `node_wallet_key`, `hf_token`, `root_contract_address`) ainsi que leurs formats.
+
+```bash
+chmod +x validate-config.sh
+./validate-config.sh            # Human‑readable output
+./validate-config.sh --json     # JSON output for scripts/CI
+```
+
+Exemple de sortie JSON (`--json`):
+
+```json
+{
+  "files": [
+    {"file": "worker-0.conf", "valid": true, "errors": []},
+    {"file": "worker-1.conf", "valid": false, "errors": ["invalid hf_token (must start with 'hf_')"]}
+  ],
+  "total_files": 2,
+  "valid_files": 1,
+  "invalid_files": 1,
+  "overall_status": "failed"
+}
+```
+
+Le script sort avec le code **0** lorsque toutes les configurations sont valides (ou qu'aucun fichier `worker-*.conf` n'existe), et **1** lorsqu'au moins une configuration est invalide — dans les deux modes (humain et JSON).
+
 ... (rest of original README unchanged) ...
 
 ## 🛠️ System Health Check

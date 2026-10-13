@@ -4,7 +4,7 @@
 # Validates all worker-*.conf files in the current directory.
 # Checks for required keys and validates their formats.
 # Exits with status 0 if all configs are valid, otherwise non-zero.
-# Usage: ./validate-config.sh [--help]
+# Usage: ./validate-config.sh [--help] [--json]
 
 set -euo pipefail
 
@@ -21,6 +21,24 @@ Usage: $0 [options]
 
 Options:
   --help        Show this help message and exit
+  --json        Emit a single machine-readable JSON object on stdout
+                describing the validation result of every worker-*.conf file.
+
+JSON schema (when --json is set):
+  {
+    "files": [
+      {"file": "worker-0.conf", "valid": true, "errors": []},
+      {"file": "worker-1.conf", "valid": false, "errors": ["invalid hf_token (must start with 'hf_')"]}
+    ],
+    "total_files": 2,
+    "valid_files": 1,
+    "invalid_files": 1,
+    "overall_status": "ok|failed"
+  }
+
+When no worker-*.conf files are found, the script emits:
+  {"files":[],"total_files":0,"valid_files":0,"invalid_files":0,"overall_status":"ok"}
+and exits 0.
 
 The script scans all files matching 'worker-*.conf' in the current directory and validates:
   - owner_address: must start with 'EQ' and be at least 10 characters long
@@ -32,11 +50,36 @@ If any validation fails, a summary table is printed and the script exits with st
 EOF
 }
 
+# JSON escaping helper (pure bash, no jq dependency)
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
 # Parse arguments
-if [[ "${1-}" == "--help" ]]; then
-    print_help
-    exit 0
-fi
+JSON=false
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h)
+            print_help
+            exit 0
+            ;;
+        --json)
+            JSON=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            print_help
+            exit 2
+            ;;
+    esac
+done
 
 # Helper functions
 is_base64() {
@@ -51,18 +94,28 @@ is_base64() {
 }
 
 # Collect results
+# errors: flat list of "file: message" strings (used for human output)
 declare -a errors
+# per-file error lists for JSON output
+declare -A file_errors
 
 shopt -s nullglob
 conf_files=(worker-*.conf)
 shopt -u nullglob
 
 if [[ ${#conf_files[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}⚠ No worker-*.conf files found in the current directory.${NC}"
+    if [[ "$JSON" == true ]]; then
+        printf '{"files":[],"total_files":0,"valid_files":0,"invalid_files":0,"overall_status":"ok"}\n'
+    else
+        echo -e "${YELLOW}⚠ No worker-*.conf files found in the current directory.${NC}"
+    fi
     exit 0
 fi
 
 for cfg in "${conf_files[@]}"; do
+    # Reset per-file error list
+    file_errors["$cfg"]=""
+
     # Read key=value pairs, ignoring comments and empty lines
     while IFS='=' read -r key value; do
         # Trim whitespace
@@ -119,6 +172,77 @@ for cfg in "${conf_files[@]}"; do
     unset OWNER_ADDRESS NODE_WALLET_KEY HF_TOKEN ROOT_CONTRACT_ADDRESS
 done
 
+# ---------------------------------------------------------------------------
+# JSON mode
+# ---------------------------------------------------------------------------
+if [[ "$JSON" == true ]]; then
+    # Build per-file error lists from the flat errors array
+    declare -A file_error_list
+    for err in "${errors[@]}"; do
+        file=$(echo "$err" | cut -d':' -f1)
+        message=$(echo "$err" | cut -d':' -f2-)
+        # Strip leading space from message
+        message="${message# }"
+        if [[ -z "${file_error_list[$file]-}" ]]; then
+            file_error_list[$file]="$message"
+        else
+            file_error_list[$file]="${file_error_list[$file]}"$'\n'"$message"
+        fi
+    done
+
+    valid_files=0
+    invalid_files=0
+    files_json="["
+    first=true
+    for cfg in "${conf_files[@]}"; do
+        if [[ -z "${file_error_list[$cfg]-}" ]]; then
+            valid=true
+            ((valid_files++))
+            errs_json="[]"
+        else
+            valid=false
+            ((invalid_files++))
+            # Build errors array for this file
+            errs_json="["
+            local_first=true
+            while IFS= read -r line; do
+                esc=$(json_escape "$line")
+                if [[ "$local_first" == true ]]; then
+                    local_first=false
+                else
+                    errs_json+=","
+                fi
+                errs_json+="\"$esc\""
+            done <<< "${file_error_list[$cfg]}"
+            errs_json+="]"
+        fi
+
+        cfg_esc=$(json_escape "$cfg")
+        if [[ "$first" == true ]]; then
+            first=false
+        else
+            files_json+=","
+        fi
+        files_json+="{\"file\":\"$cfg_esc\",\"valid\":$valid,\"errors\":$errs_json}"
+    done
+    files_json+="]"
+
+    if [[ ${#errors[@]} -eq 0 ]]; then
+        overall="ok"
+        exit_code=0
+    else
+        overall="failed"
+        exit_code=1
+    fi
+
+    printf '{"files":%s,"total_files":%d,"valid_files":%d,"invalid_files":%d,"overall_status":"%s"}\n' \
+        "$files_json" "${#conf_files[@]}" "$valid_files" "$invalid_files" "$overall"
+    exit $exit_code
+fi
+
+# ---------------------------------------------------------------------------
+# Human-readable mode (unchanged)
+# ---------------------------------------------------------------------------
 if [[ ${#errors[@]} -eq 0 ]]; then
     echo -e "${GREEN}All configuration files are valid.${NC}"
     # Print a simple PASS table
