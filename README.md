@@ -238,6 +238,41 @@ The script performs the following checks:
 
 The script prints a concise PASS/FAIL table and exits with status 0 when all checks succeed, otherwise with a non‑zero code.
 
+## 🤖 CI / Automation
+
+A single CI helper script `ci-validate.sh` runs all the deployment checks in one
+place so that CI pipelines can quickly verify a COCOON deployment is ready.
+
+```bash
+chmod +x ci-validate.sh
+./ci-validate.sh            # Human‑readable colorized table
+./ci-validate.sh --json     # JSON output for scripts/CI
+```
+
+The script executes the following checks sequentially and collects their exit codes:
+
+1. **Prerequisites** – runs `check-prerequisites.sh`.
+2. **Configuration** – runs `validate-config.sh`.
+3. **System health** – runs `system-health.sh`.
+
+It prints a table with columns `Check`, `Status` (`PASS`/`FAIL`), and `Hint`
+(shown only when a check fails). If any check fails, the script exits with
+status **1**; otherwise it exits with **0**.
+
+Example JSON output (`--json`):
+
+```json
+{
+  "checks": [
+    {"name": "prerequisites", "status": "pass", "hint": ""},
+    {"name": "config", "status": "fail", "hint": "Run ./validate-config.sh for details and fix invalid worker-*.conf values."},
+    {"name": "system_health", "status": "pass", "hint": ""}
+  ],
+  "overall_status": "failed",
+  "exit_code": 1
+}
+```
+
 ---
 
 *For any further assistance, refer to the existing documentation sections above.*
