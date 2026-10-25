@@ -164,6 +164,22 @@ The script displays:
 
 It exits with status **1** if any GPU temperature exceeds **85°C**, otherwise **0**.
 
+Example JSON output (`--json`):
+
+```json
+{
+  "gpus": [
+    {"index": 0, "name": "NVIDIA H100 80GB HBM3", "utilization": 42, "memory_total": 81559, "memory_used": 1024, "temperature": 55, "healthy": true},
+    {"index": 1, "name": "NVIDIA H100 80GB HBM3", "utilization": 90, "memory_total": 81559, "memory_used": 4096, "temperature": 88, "healthy": false}
+  ],
+  "summary": {"total": 2, "healthy": 1, "unhealthy": 1, "temp_threshold": 85},
+  "overall_status": "degraded",
+  "exit_code": 1
+}
+```
+
+Each GPU object includes a `healthy` boolean that is `true` when its temperature is `<= 85°C` and `false` otherwise. The `summary` object reports `total`, `healthy`, `unhealthy`, and `temp_threshold` counts. `overall_status` is `"ok"` when all GPUs are healthy and `"degraded"` when any GPU exceeds the threshold.
+
 ## 🚫 Arrêter les workers
 
 ```bash

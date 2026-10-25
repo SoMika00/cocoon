@@ -17,12 +17,39 @@ Usage: gpu-utilization.sh [OPTIONS]
 
 Options:
   -h, --help       Show this help message and exit
-  --json           Output GPU information as JSON array
+  --json           Output GPU information as a JSON object
 
 The script queries `nvidia-smi` for each detected GPU and displays:
   Index  Name               Util(%)  MemTotal(MiB)  MemUsed(MiB)  Temp(C)
 If any GPU temperature exceeds ${TEMP_THRESHOLD}°C, the script exits with status 1.
+
+JSON schema (when --json is set):
+  {
+    "gpus": [
+      {"index":0,"name":"NVIDIA H100 80GB HBM3","utilization":42,"memory_total":81559,"memory_used":1024,"temperature":55,"healthy":true}
+    ],
+    "summary": {"total":2,"healthy":2,"unhealthy":0,"temp_threshold":85},
+    "overall_status": "ok|degraded",
+    "exit_code": 0|1
+  }
+
+Exit codes:
+  0  all GPUs healthy
+  1  any GPU temperature exceeds ${TEMP_THRESHOLD}°C
+  3  nvidia-smi not found in PATH
+  4  no NVIDIA GPUs detected
 EOF
+}
+
+# JSON escaping helper (pure bash, no jq dependency)
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
 }
 
 # Parse arguments
@@ -62,11 +89,13 @@ if [[ -z "$CSV_OUTPUT" ]]; then
 fi
 
 # Process each line
-exit_code=0
 if $OUTPUT_JSON; then
-    # Build JSON array
-    json='['
+    # Build JSON object
+    gpus_json='['
     first=true
+    total=0
+    healthy_count=0
+    unhealthy_count=0
     while IFS=',' read -r idx name util mem_total mem_used temp; do
         # Trim leading/trailing whitespace
         idx=$(echo "$idx" | xargs)
@@ -78,23 +107,38 @@ if $OUTPUT_JSON; then
 
         # Temperature check
         if (( temp > TEMP_THRESHOLD )); then
-            exit_code=1
+            healthy=false
+            ((unhealthy_count++))
+        else
+            healthy=true
+            ((healthy_count++))
         fi
+        ((total++))
 
-        # Escape double quotes in name
-        esc_name=$(printf '%s' "$name" | sed 's/"/\\"/g')
+        esc_name=$(json_escape "$name")
         if $first; then
             first=false
         else
-            json+=','
+            gpus_json+=','
         fi
-        json+="{\"index\":$idx,\"name\":\"$esc_name\",\"utilization\":$util,\"memory_total\":$mem_total,\"memory_used\":$mem_used,\"temperature\":$temp}"
+        gpus_json+="{\"index\":$idx,\"name\":\"$esc_name\",\"utilization\":$util,\"memory_total\":$mem_total,\"memory_used\":$mem_used,\"temperature\":$temp,\"healthy\":$healthy}"
     done <<< "$CSV_OUTPUT"
-    json+=']'
-    printf '%s\n' "$json"
+    gpus_json+=']'
+
+    if (( unhealthy_count > 0 )); then
+        overall="degraded"
+        exit_code=1
+    else
+        overall="ok"
+        exit_code=0
+    fi
+
+    printf '{"gpus":%s,"summary":{"total":%d,"healthy":%d,"unhealthy":%d,"temp_threshold":%d},"overall_status":"%s","exit_code":%d}\n' \
+        "$gpus_json" "$total" "$healthy_count" "$unhealthy_count" "$TEMP_THRESHOLD" "$overall" "$exit_code"
     exit $exit_code
 else
     # Human‑readable table
+    exit_code=0
     printf "%-5s %-20s %8s %14s %14s %8s\n" "IDX" "NAME" "UTIL(%)" "MEM_TOTAL" "MEM_USED" "TEMP(C)"
     printf "%s\n" "--------------------------------------------------------------------------"
     while IFS=',' read -r idx name util mem_total mem_used temp; do
