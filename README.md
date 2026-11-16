@@ -184,8 +184,36 @@ Each GPU object includes a `healthy` boolean that is `true` when its temperature
 
 ```bash
 chmod +x stop-workers.sh
-./stop-workers.sh
+./stop-workers.sh            # Human‑readable output
+./stop-workers.sh --json     # JSON output for scripts/CI
 ```
+
+`stop-workers.sh` arrête les deux workers (en lisant leurs PID depuis
+`logs/worker-0.pid` et `logs/worker-1.pid`) ainsi que le processus watchdog
+s'il est en cours d'exécution. Le mode `--json` supprime toute sortie
+humaine et émet un unique objet JSON sur stdout, décrivant le résultat de
+l'arrêt pour chaque worker et pour le watchdog.
+
+Exemple de sortie JSON (`--json`):
+
+```json
+{
+  "workers": [
+    {"instance":0,"pid":12345,"pid_file":"logs/worker-0.pid","was_running":true,"stopped":true},
+    {"instance":1,"pid":null,"pid_file":"logs/worker-1.pid","was_running":false,"stopped":false}
+  ],
+  "watchdog": {"was_running":true,"stopped":true},
+  "overall_status": "ok",
+  "exit_code": 0
+}
+```
+
+Chaque objet worker contient `instance`, `pid` (nombre ou `null` si le fichier
+PID est absent), `pid_file`, `was_running` (booléen) et `stopped` (booléen).
+L'objet `watchdog` contient `was_running` et `stopped` (booléens).
+`overall_status` vaut `"ok"` lorsque chaque worker qui tournait est désormais
+arrêté et que le watchdog (s'il tournait) est arrêté ; sinon `"degraded"`.
+`exit_code` reflète `overall_status` (0 pour `ok`, 1 pour `degraded`).
 
 Ou manuellement:
 
