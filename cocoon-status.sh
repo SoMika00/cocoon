@@ -1,42 +1,16 @@
-#!/usr/bin/env bash
-
-# cocoon-status.sh – Consolidated health status for the entire COCOON node
-#
-# Aggregates the health of the whole node (prerequisites, GPU utilization,
-# system health, and worker status) into a single machine-readable JSON report
-# so that CI pipelines and monitoring tools can quickly assess node readiness.
-#
-# It invokes the existing sub-scripts with their --json flags:
-#   - check-prerequisites.sh --json
-#   - gpu-utilization.sh    --json
-#   - system-health.sh      --json
-#   - status-workers.sh     --json
-#
-# The merged report is emitted under top-level keys:
-#   prerequisites, gpu_utilization, system_health, workers
-# plus a computed `overall_status` field.
-#
-# overall_status is:
-#   "ok"       when every sub-script exits 0 and reports no errors
-#   "degraded" when any sub-script reports warnings but is still functional
-#   "failed"   when any sub-script reports a failure (non-zero exit code or
-#              its own overall_status == "failed")
-#
-# Exit codes:
-#   0  overall_status == "ok"
-#   1  otherwise (degraded or failed)
-#   2  a required sub-script is missing, fails to run, or produces invalid JSON
-#
-# Requires `jq` (already required by other scripts).
+#!/bin/bash
+# Status script for 2 H100 workers
 
 set -u
 
-# Colors for human-readable output
-RED='\033[0;31m'
+# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
+
+JSON=false
 
 print_help() {
     cat <<'EOF'
@@ -44,201 +18,208 @@ Usage: cocoon-status.sh [OPTIONS]
 
 Options:
   -h, --help       Show this help message and exit
-  --json           Print the merged JSON report
-  --human          Print a concise human-readable summary (default)
+  --json           Emit a single machine-readable JSON object on stdout
+                   describing the overall COCOON node status. Suppresses all
+                   human-readable output.
 
 JSON schema (when --json is set):
   {
-    "prerequisites":   <output of check-prerequisites.sh --json>,
-    "gpu_utilization": <output of gpu-utilization.sh --json>,
-    "system_health":   <output of system-health.sh --json>,
-    "workers":         <output of status-workers.sh --json>,
-    "overall_status":  "ok|degraded|failed"
+    "workers": [
+      {"instance":0,"pid":12345,"pid_file":"logs/worker-0.pid","running":true},
+      {"instance":1,"pid":null,"pid_file":"logs/worker-1.pid","running":false}
+    ],
+    "seal_server": {"running": true|false},
+    "gpus": {"count": 2, "h100_count": 2},
+    "configs": {"worker0_present": true|false, "worker1_present": true|false},
+    "overall_status": "ok|degraded",
+    "exit_code": 0|1
   }
 
-Exit codes:
-  0  overall_status is "ok"
-  1  overall_status is "degraded" or "failed"
-  2  a required sub-script is missing, fails, or produces invalid JSON
+overall_status is "ok" only when both workers are running, seal-server is
+running, and both worker configs are present; otherwise "degraded". exit_code
+mirrors overall_status (0 for ok, 1 for degraded).
 EOF
 }
 
+# JSON escaping helper (pure bash, no jq dependency)
+json_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
 # Parse arguments
-MODE="human"
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -h|--help)
+        --help|-h)
             print_help
             exit 0
             ;;
         --json)
-            MODE="json"
-            shift
-            ;;
-        --human)
-            MODE="human"
+            JSON=true
             shift
             ;;
         *)
             echo "Unknown option: $1" >&2
-            print_help
+            print_help >&2
             exit 2
             ;;
     esac
 done
 
-# Determine the repository root (directory containing this script).
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Ensure jq is available (required dependency).
-if ! command -v jq >/dev/null 2>&1; then
-    echo "Error: jq is required but not found in PATH" >&2
-    exit 2
-fi
-
-# Run a sub-script and capture its JSON output and exit code.
-# On a missing script or invalid JSON, print an error and exit 2.
-# Sets the global variables SUB_JSON and SUB_EXIT.
-run_subreport() {
-    local name="$1"
-    local script="$2"
-
-    if [[ ! -x "$SCRIPT_DIR/$script" ]]; then
-        echo "Error: required sub-script '$script' is missing or not executable" >&2
-        exit 2
+# ---------------------------------------------------------------------------
+# Gather worker state from PID files
+# ---------------------------------------------------------------------------
+worker_pid() {
+    local instance=$1
+    local pid_file="logs/worker-${instance}.pid"
+    if [[ -f "$pid_file" ]]; then
+        local pid
+        pid=$(cat "$pid_file" 2>/dev/null || true)
+        if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]] && ps -p "$pid" > /dev/null 2>&1; then
+            printf '%s' "$pid"
+            return 0
+        fi
     fi
-
-    local output
-    output=$("$SCRIPT_DIR/$script" --json 2>/dev/null)
-    SUB_EXIT=$?
-
-    if ! echo "$output" | jq -e . >/dev/null 2>&1; then
-        echo "Error: '$script --json' produced invalid JSON" >&2
-        exit 2
-    fi
-
-    SUB_JSON="$output"
+    printf ''
+    return 1
 }
 
-# Collect the four sub-reports.
-run_subreport "prerequisites" "check-prerequisites.sh"
-PREREQ_JSON="$SUB_JSON"
-PREREQ_EXIT=$SUB_EXIT
+W0_PID=$(worker_pid 0)
+W1_PID=$(worker_pid 1)
 
-run_subreport "gpu_utilization" "gpu-utilization.sh"
-GPU_JSON="$SUB_JSON"
-GPU_EXIT=$SUB_EXIT
-
-run_subreport "system_health" "system-health.sh"
-SYSTEM_JSON="$SUB_JSON"
-SYSTEM_EXIT=$SUB_EXIT
-
-run_subreport "workers" "status-workers.sh"
-WORKERS_JSON="$SUB_JSON"
-WORKERS_EXIT=$SUB_EXIT
-
-# Compute overall_status.
-#
-# A component is considered a "failure" if:
-#   - its sub-script exited non-zero, OR
-#   - its own overall_status field is "failed".
-#
-# A component is considered "degraded" (warning) if its own overall_status is
-# "degraded" (or any other non-ok, non-failed value) while still exiting 0.
-#
-# overall_status is:
-#   "failed"   if any component failed
-#   "degraded" if any component is degraded/warned
-#   "ok"       otherwise
-OVERALL_STATUS=$(jq -n \
-    --argjson prereq "$PREREQ_JSON" \
-    --argjson gpu "$GPU_JSON" \
-    --argjson system "$SYSTEM_JSON" \
-    --argjson workers "$WORKERS_JSON" \
-    --arg prereq_exit "$PREREQ_EXIT" \
-    --arg gpu_exit "$GPU_EXIT" \
-    --arg system_exit "$SYSTEM_EXIT" \
-    --arg workers_exit "$WORKERS_EXIT" \
-    '
-    def failed($exit):
-        ($exit != "0") or ((.overall_status // "") == "failed");
-    def degraded($exit):
-        ($exit == "0") and ((.overall_status // "") == "degraded");
-
-    if ($prereq | failed($prereq_exit)) or
-       ($gpu | failed($gpu_exit)) or
-       ($system | failed($system_exit)) or
-       ($workers | failed($workers_exit))
-    then "failed"
-    elif ($prereq | degraded($prereq_exit)) or
-         ($gpu | degraded($gpu_exit)) or
-         ($system | degraded($system_exit)) or
-         ($workers | degraded($workers_exit))
-    then "degraded"
-    else "ok"
-    end')
-
-# Build the merged JSON object.
-MERGED_JSON=$(jq -n \
-    --argjson prereq "$PREREQ_JSON" \
-    --argjson gpu "$GPU_JSON" \
-    --argjson system "$SYSTEM_JSON" \
-    --argjson workers "$WORKERS_JSON" \
-    --arg overall "$OVERALL_STATUS" \
-    '{prerequisites: $prereq, gpu_utilization: $gpu, system_health: $system, workers: $workers, overall_status: $overall}')
-
-if [[ "$MODE" == "json" ]]; then
-    printf '%s\n' "$MERGED_JSON"
+if [[ -n "$W0_PID" ]]; then
+    W0_RUNNING=true
 else
-    # Human-readable summary
-    PREREQ_STATUS=$(jq -r '.overall_status // "unknown"' <<< "$PREREQ_JSON")
-    GPU_STATUS=$(jq -r '.overall_status // "unknown"' <<< "$GPU_JSON")
-    SYSTEM_STATUS=$(jq -r '.overall_status // "unknown"' <<< "$SYSTEM_JSON")
-    WORKERS_STATUS=$(jq -r '.overall_status // "unknown"' <<< "$WORKERS_JSON")
-
-    echo -e "${BLUE}=== COCOON Node Consolidated Status ===${NC}"
-    echo ""
-
-    printf "%-20s %s\n" "Component" "Status"
-    printf "%-20s %s\n" "--------------------" "----------"
-
-    print_status() {
-        local label="$1"
-        local status="$2"
-        case "$status" in
-            ok)
-                printf "%-20s %b\n" "$label" "${GREEN}ok${NC}"
-                ;;
-            degraded)
-                printf "%-20s %b\n" "$label" "${YELLOW}degraded${NC}"
-                ;;
-            *)
-                printf "%-20s %b\n" "$label" "${RED}$status${NC}"
-                ;;
-        esac
-    }
-
-    print_status "Prerequisites" "$PREREQ_STATUS"
-    print_status "GPU utilization" "$GPU_STATUS"
-    print_status "System health" "$SYSTEM_STATUS"
-    print_status "Workers" "$WORKERS_STATUS"
-
-    echo ""
-    case "$OVERALL_STATUS" in
-        ok)
-            echo -e "${GREEN}Overall status: ok${NC}"
-            ;;
-        degraded)
-            echo -e "${YELLOW}Overall status: degraded${NC}"
-            ;;
-        *)
-            echo -e "${RED}Overall status: failed${NC}"
-            ;;
-    esac
+    W0_RUNNING=false
+    W0_PID=null
 fi
 
-if [[ "$OVERALL_STATUS" == "ok" ]]; then
-    exit 0
+if [[ -n "$W1_PID" ]]; then
+    W1_RUNNING=true
 else
-    exit 1
+    W1_RUNNING=false
+    W1_PID=null
 fi
+
+# ---------------------------------------------------------------------------
+# seal-server presence
+# ---------------------------------------------------------------------------
+if pgrep -f "seal-server" > /dev/null 2>&1; then
+    SEAL_RUNNING=true
+else
+    SEAL_RUNNING=false
+fi
+
+# ---------------------------------------------------------------------------
+# GPU detection
+# ---------------------------------------------------------------------------
+GPU_COUNT=$(lspci 2>/dev/null | grep -i nvidia | wc -l)
+H100_COUNT=$(lspci 2>/dev/null | grep -i "H100\|GH100" | wc -l)
+
+# ---------------------------------------------------------------------------
+# Config file presence
+# ---------------------------------------------------------------------------
+if [[ -f "worker-0.conf" ]]; then
+    CFG0_PRESENT=true
+else
+    CFG0_PRESENT=false
+fi
+
+if [[ -f "worker-1.conf" ]]; then
+    CFG1_PRESENT=true
+else
+    CFG1_PRESENT=false
+fi
+
+# ---------------------------------------------------------------------------
+# Determine overall status
+# ---------------------------------------------------------------------------
+if [[ "$W0_RUNNING" == true ]] && [[ "$W1_RUNNING" == true ]] && \
+   [[ "$SEAL_RUNNING" == true ]] && \
+   [[ "$CFG0_PRESENT" == true ]] && [[ "$CFG1_PRESENT" == true ]]; then
+    OVERALL="ok"
+    EXIT_CODE=0
+else
+    OVERALL="degraded"
+    EXIT_CODE=1
+fi
+
+# ---------------------------------------------------------------------------
+# JSON mode
+# ---------------------------------------------------------------------------
+if [[ "$JSON" == true ]]; then
+    workers_json="[{\"instance\":0,\"pid\":$W0_PID,\"pid_file\":\"logs/worker-0.pid\",\"running\":$W0_RUNNING},{\"instance\":1,\"pid\":$W1_PID,\"pid_file\":\"logs/worker-1.pid\",\"running\":$W1_RUNNING}]"
+    seal_json="{\"running\":$SEAL_RUNNING}"
+    gpus_json="{\"count\":$GPU_COUNT,\"h100_count\":$H100_COUNT}"
+    configs_json="{\"worker0_present\":$CFG0_PRESENT,\"worker1_present\":$CFG1_PRESENT}"
+
+    printf '{"workers":%s,"seal_server":%s,"gpus":%s,"configs":%s,"overall_status":"%s","exit_code":%d}\n' \
+        "$workers_json" "$seal_json" "$gpus_json" "$configs_json" "$OVERALL" "$EXIT_CODE"
+
+    exit $EXIT_CODE
+fi
+
+# ---------------------------------------------------------------------------
+# Human-readable mode (unchanged behavior)
+# ---------------------------------------------------------------------------
+echo -e "${BLUE}=== COCOON Node Status ===${NC}"
+echo ""
+
+# Workers
+echo -e "${BLUE}Workers:${NC}"
+for worker in 0 1; do
+    pid_file="logs/worker-${worker}.pid"
+    if [[ -f "$pid_file" ]]; then
+        pid=$(cat "$pid_file" 2>/dev/null || true)
+        if [[ -n "$pid" ]] && ps -p "$pid" > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${NC} Worker ${worker} running (PID: ${pid})"
+        else
+            echo -e "  ${YELLOW}⚠${NC} Worker ${worker} not running (PID file present: ${pid:-unknown})"
+        fi
+    else
+        echo -e "  ${YELLOW}⚠${NC} Worker ${worker} not running (no PID file)"
+    fi
+done
+echo ""
+
+# seal-server
+echo -e "${BLUE}seal-server:${NC}"
+if [[ "$SEAL_RUNNING" == true ]]; then
+    echo -e "  ${GREEN}✓${NC} seal-server is running"
+else
+    echo -e "  ${RED}✗${NC} seal-server is not running"
+fi
+echo ""
+
+# GPUs
+echo -e "${BLUE}GPUs:${NC}"
+echo -e "  NVIDIA GPUs detected: ${GPU_COUNT}"
+echo -e "  H100 GPUs detected: ${H100_COUNT}"
+echo ""
+
+# Configs
+echo -e "${BLUE}Configs:${NC}"
+if [[ "$CFG0_PRESENT" == true ]]; then
+    echo -e "  ${GREEN}✓${NC} worker-0.conf present"
+else
+    echo -e "  ${RED}✗${NC} worker-0.conf missing"
+fi
+if [[ "$CFG1_PRESENT" == true ]]; then
+    echo -e "  ${GREEN}✓${NC} worker-1.conf present"
+else
+    echo -e "  ${RED}✗${NC} worker-1.conf missing"
+fi
+echo ""
+
+if [[ "$OVERALL" == "ok" ]]; then
+    echo -e "${GREEN}Overall status: ok${NC}"
+else
+    echo -e "${RED}Overall status: degraded${NC}"
+fi
+
+exit $EXIT_CODE
