@@ -317,6 +317,36 @@ Example JSON output (`--json`):
 }
 ```
 
+## 🧪 Test Suite
+
+A single test runner `run-all-tests.sh` discovers and executes every `test-*.sh`
+file in the repository, then reports a PASS/FAIL summary table. It supports a
+`--json` mode for CI pipelines.
+
+```bash
+chmod +x run-all-tests.sh
+./run-all-tests.sh            # Human‑readable colorized table
+./run-all-tests.sh --json     # JSON output for scripts/CI
+```
+
+Example JSON output (`--json`):
+
+```json
+{
+  "tests": [
+    {"name": "test-health-report-json.sh", "status": "pass", "exit_code": 0},
+    {"name": "test-run-all-tests-json.sh", "status": "pass", "exit_code": 0}
+  ],
+  "summary": {"passed": 2, "failed": 0, "total": 2},
+  "overall_status": "ok",
+  "exit_code": 0
+}
+```
+
+The runner exits with status **0** when all tests pass and **1** otherwise (in
+both modes). When no `test-*.sh` files are discovered, it reports `total=0`,
+`overall_status="ok"`, and exits **0**.
+
 ---
 
 *For any further assistance, refer to the existing documentation sections above.*
