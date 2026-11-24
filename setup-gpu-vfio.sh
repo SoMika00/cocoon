@@ -51,7 +51,7 @@ Examples:
   ./setup-gpu-vfio.sh unbind 0000:01:00.0 --json
 
 JSON schema:
-  list:   [{"pci_id":"0000:01:00.0","driver":"nvidia"}, ...]
+  list:   {"command":"list","gpus":[{"pci_id":"0000:01:00.0","driver":"nvidia"}],"overall_status":"ok"}
   bind:   {"command":"bind","dry_run":false,"results":[{"pci_id":"...","success":true,"action":"...","error":""}],"overall_status":"ok|failed"}
   unbind: {"command":"unbind","dry_run":false,"results":[{"pci_id":"...","success":true,"action":"...","error":""}],"overall_status":"ok|failed"}
 EOF
@@ -150,7 +150,7 @@ cmd_list() {
             arr+="{\"pci_id\":\"$pci_esc\",\"driver\":\"$driver_esc\"}"
         done
         arr+="]"
-        printf '%s\n' "$arr"
+        printf '{"command":"list","gpus":%s,"overall_status":"ok"}\n' "$arr"
     else
         if [[ ${#gpus[@]} -eq 0 ]]; then
             echo -e "${YELLOW}No NVIDIA GPUs detected.${NC}"
@@ -180,8 +180,8 @@ cmd_bind() {
     # Ensure vfio-pci module is loaded (or would be loaded in dry-run).
     if ! ensure_vfio_module; then
         if [[ "$JSON" == true ]]; then
-            printf '{"command":"bind","dry_run":%s,"results":[],"overall_status":"failed","error":"failed to load %s module"}\n' \
-                "$DRY_RUN" "$VFIO_MODULE"
+            printf '{"command":"bind","dry_run":%s,"results":[],"overall_status":"failed"}\n' \
+                "$DRY_RUN"
         else
             echo -e "${RED}Error: failed to load ${VFIO_MODULE} module${NC}" >&2
         fi
@@ -213,6 +213,10 @@ cmd_bind() {
             if [[ "$DRY_RUN" == true ]]; then
                 action="[DRY-RUN] ${action}"
             else
+                # Record the original driver before unbinding (for later restore).
+                if [[ -n "$current_driver" ]] && [[ "$current_driver" != "$VFIO_MODULE" ]]; then
+                    record_original_driver "$pci_id" "$current_driver"
+                fi
                 # Unbind from current driver if any.
                 if [[ -n "$current_driver" ]] && [[ "$current_driver" != "$VFIO_MODULE" ]]; then
                     if ! echo "$pci_id" > "/sys/bus/pci/devices/${pci_id}/driver/unbind" 2>/dev/null; then
@@ -347,6 +351,15 @@ emit_results() {
     shift
     local results=("$@")
 
+    local overall_ok=true
+    for entry in "${results[@]}"; do
+        IFS='|' read -r _ success _ _ <<< "$entry"
+        if [[ "$success" == false ]]; then
+            overall_ok=false
+            break
+        fi
+    done
+
     if [[ "$JSON" == true ]]; then
         local arr="["
         local first=true
@@ -365,14 +378,12 @@ emit_results() {
         done
         arr+="]"
 
-        local overall="ok"
-        for entry in "${results[@]}"; do
-            IFS='|' read -r pci_id success action error <<< "$entry"
-            if [[ "$success" == false ]]; then
-                overall="failed"
-                break
-            fi
-        done
+        local overall
+        if [[ "$overall_ok" == true ]]; then
+            overall="ok"
+        else
+            overall="failed"
+        fi
 
         printf '{"command":"%s","dry_run":%s,"results":%s,"overall_status":"%s"}\n' \
             "$command" "$DRY_RUN" "$arr" "$overall"
@@ -391,95 +402,70 @@ emit_results() {
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
-DRY_RUN=false
 JSON=false
+DRY_RUN=false
 COMMAND=""
 PCI_IDS=()
 
-if [[ $# -eq 0 ]]; then
-    print_help
-    exit 2
-fi
-
-# First non-option argument is the command.
 while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -h|--help)
-            print_help
-            exit 0
+    case $1 in
+        --json)
+            JSON=true
+            shift
             ;;
         --dry-run)
             DRY_RUN=true
             shift
             ;;
-        --json)
-            JSON=true
-            shift
+        -h|--help)
+            print_help
+            exit 0
             ;;
         list|bind|unbind)
-            if [[ -z "$COMMAND" ]]; then
-                COMMAND="$1"
-                shift
-            else
-                PCI_IDS+=("$1")
-                shift
+            if [[ -n "$COMMAND" ]]; then
+                echo "Error: multiple commands specified" >&2
+                exit 2
             fi
+            COMMAND="$1"
+            shift
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            print_help >&2
+            exit 2
             ;;
         *)
-            if [[ -z "$COMMAND" ]]; then
-                echo "Unknown command or option: $1" >&2
-                print_help
-                exit 2
-            else
-                PCI_IDS+=("$1")
-                shift
-            fi
+            PCI_IDS+=("$1")
+            shift
             ;;
     esac
 done
 
 if [[ -z "$COMMAND" ]]; then
     echo "Error: no command specified" >&2
-    print_help
+    print_help >&2
     exit 2
 fi
 
 case "$COMMAND" in
     list)
         cmd_list
+        exit $?
         ;;
     bind)
         if [[ ${#PCI_IDS[@]} -eq 0 ]]; then
             echo "Error: bind requires at least one PCI ID" >&2
-            print_help
             exit 2
         fi
-        # Record original drivers before binding (non-dry-run only).
-        if [[ "$DRY_RUN" != true ]]; then
-            for pci_id in "${PCI_IDS[@]}"; do
-                if is_valid_pci_id "$pci_id" && pci_device_exists "$pci_id"; then
-                    local_driver=$(get_current_driver "$pci_id")
-                    if [[ -n "$local_driver" ]] && [[ "$local_driver" != "$VFIO_MODULE" ]]; then
-                        record_original_driver "$pci_id" "$local_driver"
-                    fi
-                fi
-            done
-        fi
         cmd_bind "${PCI_IDS[@]}"
+        exit $?
         ;;
     unbind)
         if [[ ${#PCI_IDS[@]} -eq 0 ]]; then
             echo "Error: unbind requires at least one PCI ID" >&2
-            print_help
             exit 2
         fi
         cmd_unbind "${PCI_IDS[@]}"
-        ;;
-    *)
-        echo "Unknown command: $COMMAND" >&2
-        print_help
-        exit 2
+        exit $?
         ;;
 esac
-
-exit $?
